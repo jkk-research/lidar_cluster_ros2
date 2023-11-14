@@ -103,9 +103,9 @@ def print_data(points):
 
 # main function
 if __name__ == '__main__':
-    points = read_data('notebooks/data/test01.csv')
-    points = find_neighbors(points, 0.9)
-    points = find_clusters(points, 0.9)
+    points = read_data('notebooks/data/test03.csv')
+    points = find_neighbors(points, 3.0)
+    points = find_clusters(points, 3.0)
     print_data(points)
     plot_data(points)
 

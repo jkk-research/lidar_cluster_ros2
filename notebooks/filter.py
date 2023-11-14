@@ -1,4 +1,4 @@
-# The DBSCAN (Density-Based Spatial Clustering of Applications with Noise) algorithm is a popular clustering algorithm in machine learning. 
+# Filter out X and Y values from the data file
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -30,8 +30,8 @@ def read_data(filename = 'notebooks/data/test01.csv'):
 # plot the data
 def plot_data(points, plot_neighbor_and_core=False):
     # filter with a list comprehension if -25 < p.x < +2 in p.x
-    x = [p.x for p in points if -25 < p.x < +2 and -30 < p.y < +16]
-    y = [p.y for p in points if -25 < p.x < +2 and -30 < p.y < +16]
+    x = [p.x for p in points if not -0.5 < p.x < +0.5 or not -0.5 < p.y < +0.5]
+    y = [p.y for p in points if not -0.5 < p.x < +0.5 or not -0.5 < p.y < +0.5]
     plt.scatter(x, y, s=10, alpha=0.8) ## plot the clusters 
     plt.colorbar(cax=None, ax=None, shrink=0.4)
     plt.xlabel('x')
@@ -40,7 +40,7 @@ def plot_data(points, plot_neighbor_and_core=False):
     plt.grid()
     plt.show()
     for i in range(len(x)):
-        print("%4.1f,%4.1f" % (x[i], y[i]))
+        print("%4.1f,%4.1f" % (y[i], x[i]))
     print(len(x))
 
 # main function
