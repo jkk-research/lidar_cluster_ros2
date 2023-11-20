@@ -16,8 +16,9 @@ class Point:
         self.neighbor_pts = neighbor_pts # neighbor points
 
 class Cluster:
-    def __init__(self, points, cluster_id):
+    def __init__(self, points, candidate_points, cluster_id):
         self.points = []
+        self.candidate_points = candidate_points
         self.cluster_id = cluster_id
         self.a_head = 0.0
         self.a_tail = 0.0
@@ -74,7 +75,34 @@ class Cluster:
         print("a_tail: %f" % self.a_tail)
     def get_size(self):
         return len(self.points)
-    
+    def next_tail(self, eps_min, eps_max):
+        print("next", self.points[-1].x, self.points[-1].y)
+        tail_x = self.points[-1].x
+        tail_y = self.points[-1].y
+        p = Point(tail_x, tail_y)
+        for q in self.candidate_points: 
+            if q.core == True and q.cluster_id == -1:
+                if eps_min <= distance(p, q) <= eps_max:
+                    q.cluster_id = self.cluster_id
+                    print("Found", q.x, q.y)
+                    # if my_cluster.get_size() >= 2:
+                    #     # check if orientation of the cluster tail / head is close to the new point candidate
+                    #     head_start_x, head_start_y, _, _, head_angle = my_cluster.get_head()
+                    #     tail_start_x, tail_start_y, _, _, tail_angle = my_cluster.get_tail()
+
+                    #     # calculate the angle between the new point and the head of the cluster
+                    #     actual_head_angle = my_cluster.calculate_angle(my_cluster.points[0], q)
+                    #     actual_tail_angle = my_cluster.calculate_angle(my_cluster.points[-1], q)
+
+                    #     # calculate the difference between the actual angle and the cluster angle
+                    #     diff_head = angle_diff(actual_head_angle - head_angle)
+                    #     diff_tail = angle_diff(actual_tail_angle - tail_angle)
+
+
+                    self.add_back(q, self.cluster_id)
+                    # print("new cluster point in cluster %d [%.1f, %.1f]" % (actual_cluster_id, q.x, q.y))
+
+
 # Global variables for animation TODO: better solution
 fig, ax = plt.subplots()
 cluster_plot = ax.plot(0.0, 0.0, 'r.-', label='cluster_plot', alpha=0.4)[0]
@@ -83,7 +111,7 @@ tail_plot = ax.plot(0.0, 0.0, 'y-', label='tail_plot', alpha=0.4)[0]
 tail_plot.set_linewidth(4) # increase width of the line
 head_plot = ax.plot(0.0, 0.0, 'b-', label='head_plot', alpha=0.4)[0]
 head_plot.set_linewidth(4) # increase width of the line
-my_cluster = Cluster([], 0)
+my_cluster = Cluster(points=[], candidate_points=[], cluster_id=0) ## TODO: better solution candidate_points=[] will not be empty usually
 points = []
 
 # define a function to calculate the distance between two points
@@ -175,7 +203,7 @@ def plot_data(points, plot_neighbor_and_core=False):
     plt.colorbar(cax=None, ax=None, shrink=0.4)
     plt.xlabel('x')
     plt.ylabel('y')
-    plt.title('DBline Demo')
+    plt.title('DBlane Demo')
     plt.axis('equal')
     plt.grid()
 
@@ -204,6 +232,17 @@ def plot_cluster():
     # print("tail: [%.1f, %.1f] [%.1f, %1.f]" % (tail_start_x, tail_start_y, tail_end_x, tail_end_y))
     # my_cluster.print()
     return (cluster_plot, tail_plot, head_plot)
+
+def plt_cluster(cluster):
+    head_start_x, head_start_y, head_end_x, head_end_y, head_angle = cluster.get_head()
+    tail_start_x, tail_start_y, tail_end_x, tail_end_y, tail_angle = cluster.get_tail()
+    plt.plot([head_start_x, head_end_x], [head_start_y, head_end_y], label='head_plot')
+    plt.plot([tail_start_x, tail_end_x], [tail_start_y, tail_end_y], label='tail_plot')
+    x = [p.x for p in cluster.points]
+    y = [p.y for p in cluster.points]   
+    plt.plot(x,y, label='cluster_plot')
+    plt.legend()
+
 
 # main function
 if __name__ == '__main__':
