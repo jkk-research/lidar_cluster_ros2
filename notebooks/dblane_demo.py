@@ -2,9 +2,6 @@
 
 import numpy as np
 import matplotlib.pyplot as plt
-import os
-
-
 
 # define a class of points (x, y, label)
 class Point:
@@ -15,6 +12,7 @@ class Point:
         self.cluster_id = cluster_id # cluster ID  
         self.neighbor_pts = neighbor_pts # neighbor points
 
+# define a class of clusters
 class Cluster:
     def __init__(self, points, candidate_points, cluster_id):
         self.points = []
@@ -25,12 +23,12 @@ class Cluster:
     def add_back(self, point, cluster_id):
         self.points.append(point)
         self.cluster_id = cluster_id
-        self.calculate_head_tail_angles()
+        self.recalculate_head_tail_angles()
     def add_front(self, point, cluster_id):
         self.points.insert(0, point)
         self.cluster_id = cluster_id
-        self.calculate_head_tail_angles()
-    def calculate_head_tail_angles(self):
+        self.recalculate_head_tail_angles()
+    def recalculate_head_tail_angles(self):
         # if at least two points in the cluster, calculate the slope of the first and last points
         if len(self.points) >= 2:
             first1 = self.points[1]
@@ -48,20 +46,31 @@ class Cluster:
     def set_cluster_points(self, points, cluster_id):
         self.points = points
         self.cluster_id = cluster_id
-        self.calculate_head_tail_angles()
+        self.recalculate_head_tail_angles()
 
     def get_tail(self):
+        self.recalculate_head_tail_angles()
         if len(self.points) < 2:
             return 0.0, 0.0, 0.0, 0.0, 0.0
         x_end_t = 1.0 * np.cos(self.a_tail) + self.points[-1].x 
-        y_end_t = 1.0 * np.sin(self.a_tail) + self.points[-1].y        
+        y_end_t = 1.0 * np.sin(self.a_tail) + self.points[-1].y     
+        print("tail: [%.1f, %.1f] [%.1f, %1.f]" % (self.points[-1].x, self.points[-1].y, x_end_t, y_end_t))   
         return self.points[-1].x, self.points[-1].y, x_end_t, y_end_t, self.a_tail
     def get_head(self): 
+        self.recalculate_head_tail_angles()
         if len(self.points) < 2:
             return 0.0, 0.0, 0.0, 0.0, 0.0
         x_end_h = 1.0 * np.cos(self.a_head) + self.points[0].x
         y_end_h = 1.0 * np.sin(self.a_head) + self.points[0].y
+        print("head: [%.1f, %.1f] [%.1f, %1.f]" % (self.points[0].x, self.points[0].y, x_end_h, y_end_h))   
         return self.points[0].x, self.points[0].y, x_end_h, y_end_h, self.a_head
+    # calculate the difference between two angles
+    def angle_diff(self, res):
+        res = res % np.pi
+        if res >= np.pi/2:
+            return np.abs(np.pi-res)
+        else:
+            return np.abs(res)
     def calculate_angle(self, point1, point2):
         dx = point2.x - point1.x
         dy = point2.y - point1.y
@@ -74,6 +83,8 @@ class Cluster:
         print("a_head: %f" % self.a_head)
         print("a_tail: %f" % self.a_tail)
     def get_size(self):
+        # for p in self.points:
+        #     print("[%.1f %1.f]" % (p.x, p.y), end=", ")
         return len(self.points)
     def next_tail(self, eps_min, eps_max):
         print("next", self.points[-1].x, self.points[-1].y)
@@ -84,47 +95,21 @@ class Cluster:
             if q.core == True and q.cluster_id == -1:
                 if eps_min <= distance(p, q) <= eps_max:
                     q.cluster_id = self.cluster_id
-                    print("Found", q.x, q.y)
-                    # if my_cluster.get_size() >= 2:
-                    #     # check if orientation of the cluster tail / head is close to the new point candidate
-                    #     head_start_x, head_start_y, _, _, head_angle = my_cluster.get_head()
-                    #     tail_start_x, tail_start_y, _, _, tail_angle = my_cluster.get_tail()
+                    candidate_angle = self.calculate_angle(p, q)
+                    angle_difference = self.angle_diff(candidate_angle - self.a_tail)
+                    if angle_difference < np.deg2rad(5):
+                        # print("Found", q.x, q.y)
+                        print("candidate_angle: %.1f deg, self.a_tail %.1f deg" % (np.rad2deg(candidate_angle), np.rad2deg(self.a_tail)))
+                        self.add_back(q, self.cluster_id)
+                        self.recalculate_head_tail_angles()
+                        break
+                    # print("new cluster point in cluster [%.1f, %.1f]" % (q.x, q.y))
+                    self.recalculate_head_tail_angles()
 
-                    #     # calculate the angle between the new point and the head of the cluster
-                    #     actual_head_angle = my_cluster.calculate_angle(my_cluster.points[0], q)
-                    #     actual_tail_angle = my_cluster.calculate_angle(my_cluster.points[-1], q)
-
-                    #     # calculate the difference between the actual angle and the cluster angle
-                    #     diff_head = angle_diff(actual_head_angle - head_angle)
-                    #     diff_tail = angle_diff(actual_tail_angle - tail_angle)
-
-
-                    self.add_back(q, self.cluster_id)
-                    # print("new cluster point in cluster %d [%.1f, %.1f]" % (actual_cluster_id, q.x, q.y))
-
-
-# Global variables for animation TODO: better solution
-fig, ax = plt.subplots()
-cluster_plot = ax.plot(0.0, 0.0, 'r.-', label='cluster_plot', alpha=0.4)[0]
-cluster_plot.set_linewidth(4) # increase width of the line
-tail_plot = ax.plot(0.0, 0.0, 'y-', label='tail_plot', alpha=0.4)[0]
-tail_plot.set_linewidth(4) # increase width of the line
-head_plot = ax.plot(0.0, 0.0, 'b-', label='head_plot', alpha=0.4)[0]
-head_plot.set_linewidth(4) # increase width of the line
-my_cluster = Cluster(points=[], candidate_points=[], cluster_id=0) ## TODO: better solution candidate_points=[] will not be empty usually
-points = []
 
 # define a function to calculate the distance between two points
 def distance(p1, p2):
     return np.sqrt((p1.x - p2.x) ** 2 + (p1.y - p2.y) ** 2)
-
-# calculate the difference between two angles
-def angle_diff(res):
-  res = res % np.pi
-  if res >= np.pi/2:
-    return np.abs(np.pi-res)
-  else:
-    return np.abs(res)
 
 # define a function to find the neighbors and label it as a core or non-core point
 def find_neighbors(points, eps):
@@ -139,45 +124,8 @@ def find_neighbors(points, eps):
     return points
 
 
-# define a function to find the clusters
-def find_clusters(points, eps_min, eps_max):
-    global my_cluster
-    actual_cluster_id = 0
-    for i in range(2): # number of clusters
-        # select first core point
-        for p in points:
-            if p.core == True and p.cluster_id == -1:
-                p.cluster_id = actual_cluster_id
-                break
-        for p in points: 
-            if p.cluster_id == actual_cluster_id: # every point in the actual cluster
-                for q in points:
-                    if q.core == True and q.cluster_id == -1:
-                        if eps_min <= distance(p, q) <= eps_max:
-                            q.cluster_id = actual_cluster_id
-                            if my_cluster.get_size() >= 2:
-                                # check if orientation of the cluster tail / head is close to the new point candidate
-                                head_start_x, head_start_y, _, _, head_angle = my_cluster.get_head()
-                                tail_start_x, tail_start_y, _, _, tail_angle = my_cluster.get_tail()
-
-                                # calculate the angle between the new point and the head of the cluster
-                                actual_head_angle = my_cluster.calculate_angle(my_cluster.points[0], q)
-                                actual_tail_angle = my_cluster.calculate_angle(my_cluster.points[-1], q)
-
-                                # calculate the difference between the actual angle and the cluster angle
-                                diff_head = angle_diff(actual_head_angle - head_angle)
-                                diff_tail = angle_diff(actual_tail_angle - tail_angle)
-
-                            if actual_cluster_id == 0:
-                                my_cluster.add_back(q, actual_cluster_id)
-                            # print("new cluster point in cluster %d [%.1f, %.1f]" % (actual_cluster_id, q.x, q.y))
-        actual_cluster_id += 1
-
-    return points
-
-
 # read the data
-def read_data(filename = 'notebooks/data/test01.csv'):
+def read_data(filename = 'data/test01.csv'):
     # print("Working dir:", os.getcwd()) ## print output to the console
     # read the data
     data = np.loadtxt(filename, delimiter=',', skiprows=1)
@@ -188,7 +136,7 @@ def read_data(filename = 'notebooks/data/test01.csv'):
     return points
 
 # plot the data
-def plot_data(points, plot_neighbor_and_core=False):
+def plot_data(points, plot_neighbor_and_core=False, fig = None, ax = None):
     x = [p.x for p in points]
     y = [p.y for p in points]
     core = [p.core for p in points]
@@ -199,7 +147,7 @@ def plot_data(points, plot_neighbor_and_core=False):
     if plot_neighbor_and_core == True:
         plt.scatter(x, y, s=neighbor_pts, c=core, alpha=0.5, cmap=cmap1) ## plot the neighbor points and core points
         plt.colorbar(shrink=0.4)
-    plt.scatter(x, y, s=50, c=cluster_id, alpha=0.8, cmap=cmap2, vmin=-1, vmax=(np.max(cluster_id)+1)) ## plot the clusters 
+    plt.scatter(x, y, s=50, c=cluster_id, alpha=0.2, cmap=cmap2, vmin=-1, vmax=(np.max(cluster_id)+1)) ## plot the clusters 
     plt.colorbar(cax=None, ax=None, shrink=0.4)
     plt.xlabel('x')
     plt.ylabel('y')
@@ -233,26 +181,23 @@ def plot_cluster():
     # my_cluster.print()
     return (cluster_plot, tail_plot, head_plot)
 
-def plt_cluster(cluster):
+def plt_cluster(cluster, fig = None, ax = None):
     head_start_x, head_start_y, head_end_x, head_end_y, head_angle = cluster.get_head()
     tail_start_x, tail_start_y, tail_end_x, tail_end_y, tail_angle = cluster.get_tail()
-    plt.plot([head_start_x, head_end_x], [head_start_y, head_end_y], label='head_plot')
-    plt.plot([tail_start_x, tail_end_x], [tail_start_y, tail_end_y], label='tail_plot')
+    plt.plot([head_start_x, head_end_x], [head_start_y, head_end_y], 'b*-', label='head_plot', alpha=0.4, linewidth=4.2)
+    plt.plot([tail_start_x, tail_end_x], [tail_start_y, tail_end_y], 'y*-', label='tail_plot', alpha=0.4, linewidth=4.2)
     x = [p.x for p in cluster.points]
     y = [p.y for p in cluster.points]   
-    plt.plot(x,y, label='cluster_plot')
-    plt.legend()
+    plt.plot(x,y, 'r.-', label='cluster_plot', alpha=0.4, linewidth=4.2)
+    if fig == None:
+        plt.legend()
+    else:
+        fig.legend()
 
 
 # main function
 if __name__ == '__main__':
-    points = read_data('notebooks/data/test01.csv')
-    points = find_neighbors(points, 0.8)
-    points = find_clusters(points, 0.1, 0.8)
-    #print_data(points)
-    plot_data(points)
-    plot_cluster()
-    plt.show()
+    print("DBlane main function")
 
 
 
