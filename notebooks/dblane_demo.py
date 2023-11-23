@@ -65,12 +65,23 @@ class Cluster:
         print("head: [%.1f, %.1f] [%.1f, %1.f]" % (self.points[0].x, self.points[0].y, x_end_h, y_end_h))   
         return self.points[0].x, self.points[0].y, x_end_h, y_end_h, self.a_head
     # calculate the difference between two angles
-    def angle_diff(self, res):
-        res = res % np.pi
-        if res >= np.pi/2:
-            return np.abs(np.pi-res)
+    def angle_diff(self, a, b):
+        while a < 0.0:
+            a += np.pi * 2
+        while a > np.pi * 2:
+            a -= np.pi * 2        
+        while b < 0.0:
+            b += np.pi * 2
+        while b > np.pi * 2:
+            b -= np.pi * 2       
+        if a > b:
+            greater = a
+            smaller = b
         else:
-            return np.abs(res)
+            greater = b
+            smaller = a
+        res = greater - smaller
+        return res
     def calculate_angle(self, point1, point2):
         dx = point2.x - point1.x
         dy = point2.y - point1.y
@@ -87,7 +98,7 @@ class Cluster:
         #     print("[%.1f %1.f]" % (p.x, p.y), end=", ")
         return len(self.points)
     def next_tail(self, eps_min, eps_max):
-        print("next", self.points[-1].x, self.points[-1].y)
+        # print("next", self.points[-1].x, self.points[-1].y)
         tail_x = self.points[-1].x
         tail_y = self.points[-1].y
         p = Point(tail_x, tail_y)
@@ -96,10 +107,10 @@ class Cluster:
                 if eps_min <= distance(p, q) <= eps_max:
                     q.cluster_id = self.cluster_id
                     candidate_angle = self.calculate_angle(p, q)
-                    angle_difference = self.angle_diff(candidate_angle - self.a_tail)
-                    if angle_difference < np.deg2rad(5):
+                    angle_difference = self.angle_diff(candidate_angle, self.a_tail)
+                    if angle_difference < np.deg2rad(30):
                         # print("Found", q.x, q.y)
-                        print("candidate_angle: %.1f deg, self.a_tail %.1f deg" % (np.rad2deg(candidate_angle), np.rad2deg(self.a_tail)))
+                        # print("candidate_angle: %.1f deg, self.a_tail %.1f deg" % (np.rad2deg(candidate_angle), np.rad2deg(self.a_tail)))
                         self.add_back(q, self.cluster_id)
                         self.recalculate_head_tail_angles()
                         break
