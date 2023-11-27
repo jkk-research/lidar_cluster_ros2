@@ -9,27 +9,26 @@ import numpy as np
 if __name__ == '__main__':
 
     fig, ax = plt.subplots()
-    candidate_pts = dbl.read_data('notebooks/data/test04.csv')
-    points = dbl.find_neighbors(candidate_pts, 10.8) # TODO: this is a high value, just testing if almost everything is core point
+    candidate_pts = dbl.read_data('notebooks/data/test03.csv')
     dbl.plot_data(candidate_pts, fig=fig, ax=ax)
 
     print(len(candidate_pts))
-    cluster1 = dbl.Cluster([], candidate_pts, 0)
+    cluster1 = dbl.Cluster(candidate_points=candidate_pts, eps_min=1.2, eps_max=8.2, ang_threshold_deg=30.0)
     # cluster1.add_back(candidate_pts[np.random.randint(len(candidate_pts))], 0)
     # cluster1.add_back(candidate_pts[np.random.randint(len(candidate_pts))], 0)
     cluster1.add_back(candidate_pts[14], 0)
     cluster1.add_back(candidate_pts[9], 0)
-    # cluster1.print()
+    # cluster1.print_cluster(0)
 
     dbl.plt_cluster(cluster1, fig=fig, ax=ax)
     
     for i in range(20):
         fig.clear()
-        cluster1.next_tail(1.2, 8.2)
+        cluster1.next_tail(id=0)
         dbl.plot_data(candidate_pts, fig=fig, ax=ax)
         dbl.plt_cluster(cluster1, fig=fig, ax=ax)
         ax.set_title(f"frame {i}")
-        print("Size: ", cluster1.get_size())
+        print("Size: ", cluster1.get_size(0))
         # Note that using time.sleep does *not* work here!
         plt.pause(1.5)
     # To save the animation using Pillow as a gif
