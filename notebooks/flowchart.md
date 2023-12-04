@@ -1,1 +1,20 @@
-[![](https://mermaid.ink/img/pako:eNq9lNFq2zAUhl9FqDctxDR1HAYaZJQ4pYHRjTVjF3EYqnUci8lSZsmkWZx337Fruc3asTLY5Av7HP36vyPJ0p6mRgBldF3yTU4W8dtENw_BNuUqrRR38NFI7ezydMq1kA4T5CFztmKMWbdTcEGCYELmWrob2E5VZR2UyyYkGJP0IUFW3nlWbNyuk6FvGxIf_7XrsfDY5OrDp31mysPj7L5cz9_PvChEUUC-V2CdNPqUzC3RcO-I41IRU5IcuHh31ogm9aKsoJ7dxH7s2Dsi46nfhNS6Ku6wQpP5Ym3dYvfbXCo4dAP9eI_3JqPGpL7iykJ9Gcdfr7GI8wVWtLwUgvRRv1xRC-137bPm1sq1BrHsc6Tqk6tn2_w44NgR59XX6N-pQm0MGenWOJNKsZNRxCEdD6wrzTdgJxfj8E0UdmGwlcLlLNrcD1KjTNl3Z0a7wMofwMIhdrbhFuQ6d-zOKPE7ZtgxjyC_lPCc2XX_ifkyctQhs7a9FvnKab6MjHrkENt_QY475HDYQP8BsoHSAS2gLLgUePfsm0xCXQ4FJJThp4CMV8olNNEHlFYbgf_nDC8fU1KWNSdiQHnlzO1Op5Q5PJFeFEuOV1nRqQ4_Ac4Cpcc)](https://mermaid-js.github.io/mermaid-live-editor/edit/#pako:eNq9lNFq2zAUhl9FqDctxDR1HAYaZJQ4pYHRjTVjF3EYqnUci8lSZsmkWZx337Fruc3asTLY5Av7HP36vyPJ0p6mRgBldF3yTU4W8dtENw_BNuUqrRR38NFI7ezydMq1kA4T5CFztmKMWbdTcEGCYELmWrob2E5VZR2UyyYkGJP0IUFW3nlWbNyuk6FvGxIf_7XrsfDY5OrDp31mysPj7L5cz9_PvChEUUC-V2CdNPqUzC3RcO-I41IRU5IcuHh31ogm9aKsoJ7dxH7s2Dsi46nfhNS6Ku6wQpP5Ym3dYvfbXCo4dAP9eI_3JqPGpL7iykJ9Gcdfr7GI8wVWtLwUgvRRv1xRC-137bPm1sq1BrHsc6Tqk6tn2_w44NgR59XX6N-pQm0MGenWOJNKsZNRxCEdD6wrzTdgJxfj8E0UdmGwlcLlLNrcD1KjTNl3Z0a7wMofwMIhdrbhFuQ6d-zOKPE7ZtgxjyC_lPCc2XX_ifkyctQhs7a9FvnKab6MjHrkENt_QY475HDYQP8BsoHSAS2gLLgUePfsm0xCXQ4FJJThp4CMV8olNNEHlFYbgf_nDC8fU1KWNSdiQHnlzO1Op5Q5PJFeFEuOV1nRqQ4_Ac4Cpcc)
+# DBlane flowchart
+
+``` mermaid
+graph TD;
+
+    CalculatePoints[(Canditate Points)]:::style1 --> InitNewCluster[Init New cluster ]
+    EmptyClusters[(Empty Clusters)]:::style1 --> InitNewCluster[Init New <br> cluster ]
+    InitNewCluster:::style1 --> FOR{for}
+    WHILE:::style2 --- question( Is next tail or head?) --->|True|END:::style5
+    FOR:::style2 --> |number of clusters|WHILE{while}
+    question:::style3 -->|False|ADD_Head/Tail[Add Head/Tail]:::style4 --> CalculateUnassigned[Calculate unassigned]
+    CalculateUnassigned:::style4 --> FOR 
+    classDef style1 fill:#34aec5,stroke:#152742,stroke-width:4px,color:#152742  
+    classDef style2 fill:#152742,stroke:#34aec5,stroke-width:4px,color:#34aec5
+    classDef style3 fill:#ffffff,stroke:#152742,stroke-width:4px,color:#152742
+    classDef style4 fill:#f04444,stroke:#152742,stroke-width:4px,color:#152742
+    classDef style5 fill:#88f088,stroke:#152742,stroke-width:4px,color:#152742
+```
+
+  
