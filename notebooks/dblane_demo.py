@@ -9,6 +9,12 @@ class Point:
         self.x = x
         self.y = y
         self.core = core # core point (True) or non-core point (False)
+        """cluster_id is the cluster ID of the point:
+        cluster_id = -1: undecided values, not assigned to any cluster
+        cluster_id = 0: unassigned values: already visited, but not assigned to any cluster
+        cluster_id = 1: assigned to the first cluster
+        cluster_id = 2: assigned to the second cluster and so on
+        """
         self.cluster_id = cluster_id # cluster ID  
         self.neighbor_pts = neighbor_pts # neighbor points
 
@@ -44,14 +50,16 @@ class Cluster:
         self.tail_angle = []
         for _ in range(self.cluster_num): self.head_angle.append(0.0)
         for _ in range(self.cluster_num): self.tail_angle.append(0.0)
+        self.first_run_neighbors = True
         self.recalculate_head_tail_angles()
         self.find_neighbors()
-
     def add_back(self, point, cluster_id):
         self.cluster_points[cluster_id].append(point)
+        point.cluster_id = cluster_id
         self.recalculate_head_tail_angles()
     def add_front(self, point, cluster_id):
         self.cluster_points[cluster_id].insert(0, point)
+        point.cluster_id = cluster_id
         self.recalculate_head_tail_angles()
     def recalculate_head_tail_angles(self):
         # if at least two points in the cluster, calculate the slope of the first and last points
@@ -70,19 +78,20 @@ class Cluster:
                 self.tail_angle[i] = 0.0
     # find the neighbors and label it as a core or non-core point
     def find_neighbors(self):
-        for p in self.candidate_points:
-            for q in self.candidate_points:
-                if distance(p, q) <= self.eps_max:
-                    p.neighbor_pts += 1
-            if p.neighbor_pts >= 3: # if the number of neighbors is greater than 3, it is a core point
-                p.core = True
-            else:
-                p.core = False
+        if self.first_run_neighbors == True:
+            self.first_run_neighbors = False
+            for p in self.candidate_points:
+                for q in self.candidate_points:
+                    if self.distance(p, q) <= self.eps_max:
+                        p.neighbor_pts += 1
+                if p.neighbor_pts >= 3: # if the number of neighbors is greater than 3, it is a core point
+                    p.core = True
+                else:
+                    p.core = False
 
     def set_cluster_points(self, points, cluster_id):
         self.cluster_points[cluster_id] = points
         self.recalculate_head_tail_angles()
-
     def get_tail(self, id):
         self.recalculate_head_tail_angles()
         if len(self.cluster_points[id]) < 2:
@@ -123,24 +132,25 @@ class Cluster:
         rad = np.arctan2(dy, dx)
         return rad
     def print_cluster(self, id):
-        print("Cluster %d:" % self.cluster_num)
+        print("Total %d clusters" % self.cluster_num)
+        print("Cluster[%d] has %d points" % (id, len(self.cluster_points[id])))
         for p in self.cluster_points[id]:
             print("[%4.1f,%4.1f] %r %d %d" % (p.x, p.y, p.core, p.cluster_id, p.neighbor_pts))
-        print("a_head: %f" % self.head_angle[id])
-        print("a_tail: %f" % self.tail_angle[id])
+        print("a_head(%d): %f" % (id, self.head_angle[id]))
+        print("a_tail(%d): %f" % (id, self.tail_angle[id]))
     def get_size(self, id):
         # for p in self.cluster_points[id]:
         #     print("[%.1f %1.f]" % (p.x, p.y), end=", ")
         return len(self.cluster_points[id])
     def next_tail(self, id):
+        extending = False
         # print("next", self.cluster_points[-1].x, self.cluster_points[-1].y)
         tail_x = self.cluster_points[id][-1].x
         tail_y = self.cluster_points[id][-1].y
         p = Point(tail_x, tail_y)
         for q in self.candidate_points: 
             if q.core == True and q.cluster_id == -1:
-                if self.eps_min <= distance(p, q) <= self.eps_max:
-                    q.cluster_id = id
+                if self.eps_min <= self.distance(p, q) <= self.eps_max:
                     candidate_angle = self.calculate_angle(p, q)
                     angle_difference = self.angle_diff(candidate_angle, self.tail_angle[id])
                     if angle_difference < self.ang_threshold:
@@ -148,16 +158,45 @@ class Cluster:
                         # print("candidate_angle: %.1f deg, self.tail_angle %.1f deg" % (np.rad2deg(candidate_angle), np.rad2deg(self.tail_angle)))
                         self.add_back(q, id)
                         self.recalculate_head_tail_angles()
+                        extending = True
                         break
                     # print("new cluster point in cluster [%.1f, %.1f]" % (q.x, q.y))
                     self.recalculate_head_tail_angles()
+        return extending
+    # define a function to calculate the distance between two points
+    def distance(self, p1, p2):
+        return np.sqrt((p1.x - p2.x) ** 2 + (p1.y - p2.y) ** 2)
+    # extend the unassigned values (cluster_id=0) which is already visited, but nut assigned to any cluster
+    def calc_unassigned(self, id):
+        for p in self.cluster_points[id]:
+            for q in self.candidate_points:
+                # TODO: self.eps_max * 0.5 is a magic number, should be used as a parameter or calculated from the data
+                if self.distance(p, q) <= self.eps_max * 0.5 and q.cluster_id == -1:
+                    q.cluster_id = 0 # unassigned
+    def init_new_cluster(self, id):
+        # self.cluster_points[id] = []
+        for p in self.candidate_points:
+            for q in self.candidate_points:
+                if p.core == True and q.core == True and p.cluster_id == -1 and q.cluster_id == -1:
+                    if self.eps_min <= self.distance(p, q) <= self.eps_max:
+                        self.add_back(p, id)
+                        self.add_back(q, id)
+                        self.recalculate_head_tail_angles()
+                        # print("init new cluster: [%.1f, %.1f] [%.1f, %1.f]" % (p.x, p.y, q.x, q.y))
+                        return
 
-
-# define a function to calculate the distance between two points
-def distance(p1, p2):
-    return np.sqrt((p1.x - p2.x) ** 2 + (p1.y - p2.y) ** 2)
-
-
+    def calcuate_clusters(self):
+        current_cluster_id = 1
+        # Step: For number of clusters
+        for current_cluster_id in range(1, self.cluster_num): # TODO: maybe self.cluster_num + 1???
+            extending = True
+            # add initial points - Step: Init new cluster
+            self.init_new_cluster(current_cluster_id)
+            while extending == True:
+                # Step: Add head / tail to cluster
+                extending = self.next_tail(id=current_cluster_id)
+        # Step: calculate unassigned points and extend the unassigned values
+        self.calc_unassigned(id=current_cluster_id)
 
 
 # read the data
@@ -183,7 +222,7 @@ def plot_data(points, plot_neighbor_and_core=False, fig = None, ax = None):
     if plot_neighbor_and_core == True:
         plt.scatter(x, y, s=neighbor_pts, c=core, alpha=0.5, cmap=cmap1) ## plot the neighbor points and core points
         plt.colorbar(shrink=0.4)
-    plt.scatter(x, y, s=50, c=cluster_id, alpha=0.2, cmap=cmap2, vmin=-1, vmax=(np.max(cluster_id)+1)) ## plot the clusters 
+    plt.scatter(x, y, s=50, c=cluster_id, alpha=0.8, cmap=cmap2) ## plot the clusters  ## , vmin=-1, vmax=(np.max(cluster_id)+1)
     plt.colorbar(cax=None, ax=None, shrink=0.4)
     plt.xlabel('x')
     plt.ylabel('y')
@@ -195,7 +234,13 @@ def plot_data(points, plot_neighbor_and_core=False, fig = None, ax = None):
 def print_data(points):
     print("--------------------")
     for p in points:
-        print("[%4.1f,%4.1f] %r %d %d" % (p.x, p.y, p.core, p.cluster_id, p.neighbor_pts))
+        if p.cluster_id == -1:
+            None
+            #print("{%4.1f,%4.1f} %r N%d undecided" % (p.x, p.y, p.core, p.neighbor_pts))
+        elif p.cluster_id == 0:
+            print("(%4.1f,%4.1f) %r N%d unassigned" % (p.x, p.y, p.core, p.neighbor_pts))
+        else:
+            print("[%4.1f,%4.1f] %r C%d N%d" % (p.x, p.y, p.core, p.cluster_id, p.neighbor_pts))
 
 def plot_cluster():
     global my_cluster, cluster_plot, tail_plot, head_plot
@@ -205,8 +250,8 @@ def plot_cluster():
     cluster_plot.set_xdata(x) 
     cluster_plot.set_ydata(y)
 
-    head_start_x, head_start_y, head_end_x, head_end_y, head_angle = my_cluster.get_head(0)
-    tail_start_x, tail_start_y, tail_end_x, tail_end_y, tail_angle = my_cluster.get_tail(0)
+    head_start_x, head_start_y, head_end_x, head_end_y, head_angle = my_cluster.get_head(id=1)
+    tail_start_x, tail_start_y, tail_end_x, tail_end_y, tail_angle = my_cluster.get_tail(id=1)
     head_plot.set_xdata([head_start_x, head_end_x])
     head_plot.set_ydata([head_start_y, head_end_y])
     tail_plot.set_xdata([tail_start_x, tail_end_x])
@@ -217,13 +262,13 @@ def plot_cluster():
     # my_cluster.print()
     return (cluster_plot, tail_plot, head_plot)
 
-def plt_cluster(cluster, fig = None, ax = None):
-    head_start_x, head_start_y, head_end_x, head_end_y, head_angle = cluster.get_head(0)
-    tail_start_x, tail_start_y, tail_end_x, tail_end_y, tail_angle = cluster.get_tail(0)
+def plt_cluster(cluster, fig = None, ax = None, c_id=1):
+    head_start_x, head_start_y, head_end_x, head_end_y, head_angle = cluster.get_head(id=c_id)
+    tail_start_x, tail_start_y, tail_end_x, tail_end_y, tail_angle = cluster.get_tail(id=c_id)
     plt.plot([head_start_x, head_end_x], [head_start_y, head_end_y], 'b*-', label='head_plot', alpha=0.4, linewidth=4.2)
     plt.plot([tail_start_x, tail_end_x], [tail_start_y, tail_end_y], 'y*-', label='tail_plot', alpha=0.4, linewidth=4.2)
-    x = [p.x for p in cluster.cluster_points[0]]
-    y = [p.y for p in cluster.cluster_points[0]]   
+    x = [p.x for p in cluster.cluster_points[c_id]]
+    y = [p.y for p in cluster.cluster_points[c_id]]   
     plt.plot(x,y, 'r.-', label='cluster_plot', alpha=0.4, linewidth=4.2)
     if fig == None:
         plt.legend()
