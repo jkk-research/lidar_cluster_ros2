@@ -1,3 +1,4 @@
+// Spatial DBlane filter for point cloud data
 #include <cstdio>
 
 int main(int argc, char ** argv)
@@ -5,6 +6,6 @@ int main(int argc, char ** argv)
   (void) argc;
   (void) argv;
 
-  printf("hello world lidar_cluster package\n");
+  printf("TODO implement spatial DBlane\n");
   return 0;
 }
