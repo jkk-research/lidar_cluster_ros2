@@ -8,6 +8,7 @@
 // ROS
 #include "rclcpp/rclcpp.hpp"
 #include "sensor_msgs/msg/point_cloud2.hpp"
+#include "visualization_msgs/msg/marker_array.hpp"
 #include "rcl_interfaces/msg/set_parameters_result.hpp"
 // PCL
 #include <pcl/point_cloud.h>
@@ -53,6 +54,21 @@ class DbscanSpatial : public rclcpp::Node
       {
         maxZ = param.as_double();
       }
+      if (param.get_name() == "points_in_topic")
+      {
+        points_in_topic = param.as_string();
+        sub_lidar_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(points_in_topic, rclcpp::SensorDataQoS().keep_last(1), std::bind(&DbscanSpatial::lidar_callback, this, std::placeholders::_1));
+      }
+      if (param.get_name() == "points_out_topic")
+      {
+        points_out_topic = param.as_string();
+        pub_lidar_ = this->create_publisher<sensor_msgs::msg::PointCloud2>(points_out_topic, 10);
+      }
+      if (param.get_name() == "marker_out_topic")
+      {
+        marker_out_topic = param.as_string();
+        pub_marker_ = this->create_publisher<visualization_msgs::msg::MarkerArray>(marker_out_topic, 10);
+      }
     }
     return result;
   }
@@ -66,17 +82,28 @@ public:
     this->declare_parameter<float>("maxX", maxX);
     this->declare_parameter<float>("maxY", maxY);
     this->declare_parameter<float>("maxZ", maxZ);
+    this->declare_parameter<std::string>("points_in_topic", "/lexus3/os_center/points");
+    this->declare_parameter<std::string>("points_out_topic", "cluster_points");
+    this->declare_parameter<std::string>("marker_out_topic", "cluster_marker");
     this->get_parameter("minX", minX);
     this->get_parameter("minY", minY);
     this->get_parameter("minZ", minZ);
     this->get_parameter("maxX", maxX);
     this->get_parameter("maxY", maxY);
     this->get_parameter("maxZ", maxZ);
+    this->get_parameter("points_in_topic", points_in_topic);
+    this->get_parameter("points_out_topic", points_out_topic);
+    this->get_parameter("marker_out_topic", marker_out_topic);
 
-    RCLCPP_INFO(this->get_logger(), "DbscanSpatial node has been started.");
-    pub_lidar_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("lidar_filter_output", 10);
-    sub_lidar_ = this->create_subscription<sensor_msgs::msg::PointCloud2>("/lexus3/os_center/points", rclcpp::SensorDataQoS().keep_last(1), std::bind(&DbscanSpatial::lidar_callback, this, std::placeholders::_1));
+
+    pub_lidar_ = this->create_publisher<sensor_msgs::msg::PointCloud2>(points_out_topic, 10);
+    pub_marker_ = this->create_publisher<visualization_msgs::msg::MarkerArray>(marker_out_topic, 10);
+    sub_lidar_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(points_in_topic, rclcpp::SensorDataQoS().keep_last(1), std::bind(&DbscanSpatial::lidar_callback, this, std::placeholders::_1));
     callback_handle_ = this->add_on_set_parameters_callback(std::bind(&DbscanSpatial::parametersCallback, this, std::placeholders::_1));
+    
+    RCLCPP_INFO(this->get_logger(), "DbscanSpatial node has been started.");
+    RCLCPP_INFO(this->get_logger(), "Subscribing to: '%s'", points_in_topic.c_str());
+    RCLCPP_INFO(this->get_logger(), "Publishing to: '%s' and '%s'", points_out_topic.c_str(), marker_out_topic.c_str());
   }
 
 private:
@@ -106,10 +133,12 @@ private:
   }
 
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_lidar_;
+  rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr pub_marker_;
   rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr sub_lidar_;
   OnSetParametersCallbackHandle::SharedPtr callback_handle_;
   float minX = 0.0, minY = -5.0, minZ = -2.0;
-  float maxX = 40.0, maxY = +5.0, maxZ = -0.15;      
+  float maxX = 40.0, maxY = +5.0, maxZ = -0.15;
+  std::string points_in_topic, points_out_topic, marker_out_topic;  
   size_t count_;
 };
 
