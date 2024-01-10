@@ -14,7 +14,7 @@ def generate_launch_description():
         DeclareLaunchArgument("topic", description="a pointcloud topic to process", default_value="nonground"),
         Node(
             package='lidar_cluster',
-            executable='dbscan_spatial',
+            executable='dblane_f1s',
             output='screen',
             parameters=[
                 {'points_in_topic': LaunchConfiguration("topic")},

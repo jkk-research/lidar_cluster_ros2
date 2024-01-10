@@ -1,5 +1,12 @@
-// Non-grid (spatial) DBSCAN filter for point cloud data
-// The DBSCAN (Density-Based Spatial Clustering of Applications with Noise) algorithm is a popular clustering algorithm in machine learning
+// Non-grid (spatial) euclidean cluster filter for point cloud data
+// based on https://github.com/autowarefoundation/autoware.universe/blob/main/perception/euclidean_cluster/lib/euclidean_cluster.cpp
+// Copyright 2020 Tier IV, Inc.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
 
 #include <chrono>
 #include <functional>
@@ -17,82 +24,14 @@
 #include <pcl/point_types.h>
 #include <pcl_conversions/pcl_conversions.h>
 #include <pcl/filters/crop_box.h>
+#include <pcl/kdtree/kdtree.h>
+#include <pcl/segmentation/extract_clusters.h>
+#include <pcl/filters/crop_box.h>
 
 using namespace std::chrono_literals;
 using std::placeholders::_1;
 
-class Point
-{
-public:
-  double x, y;
-  int neighbor_pts = 0;
-  bool core = false;
-  int cluster_id = -1;
-};
-
-double distance(const Point &p1, const Point &p2)
-{
-  return std::sqrt(std::pow(p1.x - p2.x, 2) + std::pow(p1.y - p2.y, 2));
-}
-
-void find_neighbors(std::vector<Point> &points, double eps)
-{
-  for (Point &p : points)
-  {
-    for (const Point &q : points)
-    {
-      if (distance(p, q) <= eps)
-      {
-        p.neighbor_pts++;
-      }
-    }
-    p.core = p.neighbor_pts >= 3;
-  }
-}
-
-void find_clusters(std::vector<Point> &points, double eps)
-{
-  int actual_cluster_id = 0;
-  for (int i = 0; i < 10; i++)
-  {
-    for (Point &p : points)
-    {
-      if (p.core && p.cluster_id == -1)
-      {
-        p.cluster_id = actual_cluster_id;
-        break;
-      }
-    }
-    for (Point &p : points)
-    {
-      if (p.cluster_id == actual_cluster_id)
-      {
-        for (Point &q : points)
-        {
-          if (q.core && q.cluster_id == -1 && distance(p, q) <= eps)
-          {
-            q.cluster_id = actual_cluster_id;
-          }
-        }
-      }
-    }
-    actual_cluster_id++;
-  }
-  for (Point &p : points)
-  {
-    if (!p.core)
-    {
-      for (const Point &q : points)
-      {
-        if (q.core && q.cluster_id != -1 && distance(p, q) <= eps)
-        {
-          p.cluster_id = q.cluster_id;
-        }
-      }
-    }
-  }
-}
-class DbscanSpatial : public rclcpp::Node
+class EucledianSpatial : public rclcpp::Node
 {
   rcl_interfaces::msg::SetParametersResult parametersCallback(const std::vector<rclcpp::Parameter> &parameters)
   {
@@ -129,7 +68,7 @@ class DbscanSpatial : public rclcpp::Node
       if (param.get_name() == "points_in_topic")
       {
         points_in_topic = param.as_string();
-        sub_lidar_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(points_in_topic, rclcpp::SensorDataQoS().keep_last(1), std::bind(&DbscanSpatial::lidar_callback, this, std::placeholders::_1));
+        sub_lidar_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(points_in_topic, rclcpp::SensorDataQoS().keep_last(1), std::bind(&EucledianSpatial::lidar_callback, this, std::placeholders::_1));
       }
       if (param.get_name() == "points_out_topic")
       {
@@ -146,7 +85,7 @@ class DbscanSpatial : public rclcpp::Node
   }
 
 public:
-  DbscanSpatial() : Node("dbscan_spatial"), count_(0)
+  EucledianSpatial() : Node("eucledian_spatial"), count_(0)
   {
     this->declare_parameter<float>("minX", minX);
     this->declare_parameter<float>("minY", minY);
@@ -159,6 +98,10 @@ public:
     this->declare_parameter<std::string>("marker_out_topic", "clustered_marker");
     this->declare_parameter<bool>("verbose1", verbose1);
     this->declare_parameter<bool>("verbose2", verbose2);
+    this->declare_parameter<float>("tolerance", tolerance_);
+    this->declare_parameter<int>("min_cluster_size", min_cluster_size_);
+    this->declare_parameter<int>("max_cluster_size", max_cluster_size_);
+    this->declare_parameter<bool>("use_height", use_height_);
     this->get_parameter("minX", minX);
     this->get_parameter("minY", minY);
     this->get_parameter("minZ", minZ);
@@ -170,14 +113,18 @@ public:
     this->get_parameter("marker_out_topic", marker_out_topic);
     this->get_parameter("verbose1", verbose1);
     this->get_parameter("verbose2", verbose2);
+    this->get_parameter("tolerance", tolerance_);
+    this->get_parameter("min_cluster_size", min_cluster_size_);
+    this->get_parameter("max_cluster_size", max_cluster_size_);
+    this->get_parameter("use_height", use_height_);
 
     pub_lidar_ = this->create_publisher<sensor_msgs::msg::PointCloud2>(points_out_topic, 10);
     pub_marker_ = this->create_publisher<visualization_msgs::msg::MarkerArray>(marker_out_topic, 10);
     // TODO: QoS // rclcpp::SensorDataQoS().keep_last(1)
-    sub_lidar_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(points_in_topic, 10, std::bind(&DbscanSpatial::lidar_callback, this, std::placeholders::_1));
-    callback_handle_ = this->add_on_set_parameters_callback(std::bind(&DbscanSpatial::parametersCallback, this, std::placeholders::_1));
+    sub_lidar_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(points_in_topic, 10, std::bind(&EucledianSpatial::lidar_callback, this, std::placeholders::_1));
+    callback_handle_ = this->add_on_set_parameters_callback(std::bind(&EucledianSpatial::parametersCallback, this, std::placeholders::_1));
 
-    RCLCPP_INFO(this->get_logger(), "DbscanSpatial node has been started.");
+    RCLCPP_INFO(this->get_logger(), "EucledianSpatial node has been started.");
     RCLCPP_INFO(this->get_logger(), "Subscribing to: '%s'", points_in_topic.c_str());
     RCLCPP_INFO(this->get_logger(), "Publishing to: '%s' and '%s'", points_out_topic.c_str(), marker_out_topic.c_str());
   }
@@ -186,60 +133,90 @@ private:
   void lidar_callback(const sensor_msgs::msg::PointCloud2::ConstSharedPtr input_msg)
   {
     // Convert to PCL data type
-    pcl::PointCloud<pcl::PointXYZI>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZI>);
-    pcl::fromROSMsg(*input_msg, *cloud);
-    pcl::PointCloud<pcl::PointXYZI>::Ptr cloud_filtered(new pcl::PointCloud<pcl::PointXYZI>);
-    int original_size = cloud->width * cloud->height;
+    pcl::PointCloud<pcl::PointXYZ>::Ptr pointcloud(new pcl::PointCloud<pcl::PointXYZ>); // not PointXYZI
+    pcl::PointCloud<pcl::PointXYZ>::ConstPtr pointcloud_ptr(new pcl::PointCloud<pcl::PointXYZ>);
+    pcl::fromROSMsg(*input_msg, *pointcloud);
+    std::vector<pcl::PointCloud<pcl::PointXYZ>> clusters;
+    pcl::PointCloud<pcl::PointXYZ>::Ptr pointcloud_filtered(new pcl::PointCloud<pcl::PointXYZ>);
+
+    int original_size = pointcloud->width * pointcloud->height;
+
+
 
     // Filter out points outside of the box
-    pcl::CropBox<pcl::PointXYZI> crop;
-    crop.setInputCloud(cloud);
+    pcl::CropBox<pcl::PointXYZ> crop;
+    crop.setInputCloud(pointcloud);
     crop.setMin(Eigen::Vector4f(minX, minY, minZ, 1.0));
     crop.setMax(Eigen::Vector4f(maxX, maxY, maxZ, 1.0));
-    crop.filter(*cloud);
+    crop.filter(*pointcloud);
 
     if (verbose1)
     {
-      // print the length of the pointcloud
-      RCLCPP_INFO_STREAM(this->get_logger(), "PointCloud in: " << original_size << " reduced size before cluster: " << cloud->width * cloud->height);
+      // print the length of the point pointcloud
+      RCLCPP_INFO_STREAM(this->get_logger(), "PointCloud in: " << original_size << " Reduced size: " << pointcloud->width * pointcloud->height);
     }
 
-    // DBSCAN
-    // find neighbors in cloud
-    std::vector<Point> points;
 
-    for (const pcl::PointXYZI &p : cloud->points)
+    // convert 2d pointcloud
+    if (!use_height_)
     {
+      pcl::PointCloud<pcl::PointXYZ>::Ptr pointcloud_2d_ptr(new pcl::PointCloud<pcl::PointXYZ>);
+      int i = 0;
+      for (const auto &point : pointcloud->points)
       {
-        Point point;
-        point.x = p.x;
-        point.y = p.y;
-        points.push_back(point);
+        //if (i > 60000 and i < 70000)
+        {
+          pcl::PointXYZ point2d;
+          point2d.x = point.x;
+          point2d.y = point.y;
+          point2d.z = 0.0;
+          pointcloud_2d_ptr->push_back(point2d);
+        }
       }
+      pointcloud_ptr = pointcloud_2d_ptr;
+    }
+    else
+    {
+      pointcloud_ptr = pointcloud;
     }
 
-    find_neighbors(points, 3.5);
-    // find clusters in cloud
-    find_clusters(points, 3.5);
-
-    // convert to PointXYZI
-    for (const Point &p : points)
+    // create tree
+    pcl::search::KdTree<pcl::PointXYZ>::Ptr tree(new pcl::search::KdTree<pcl::PointXYZ>);
+    tree->setInputCloud(pointcloud_ptr);
+    // clustering
+    std::vector<pcl::PointIndices> cluster_indices;
+    pcl::EuclideanClusterExtraction<pcl::PointXYZ> pcl_euclidean_cluster;
+    pcl_euclidean_cluster.setClusterTolerance(tolerance_);
+    pcl_euclidean_cluster.setMinClusterSize(min_cluster_size_);
+    pcl_euclidean_cluster.setMaxClusterSize(max_cluster_size_);
+    pcl_euclidean_cluster.setSearchMethod(tree);
+    pcl_euclidean_cluster.setInputCloud(pointcloud_ptr);
+    pcl_euclidean_cluster.extract(cluster_indices);
+    // build output
+    pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_cluster(new pcl::PointCloud<pcl::PointXYZ>);
     {
-      pcl::PointXYZI point;
-      point.x = p.x;
-      point.y = p.y;
-      point.z = 0.0;
-      point.intensity = p.cluster_id;
-      cloud_filtered->points.push_back(point);
+      for (const auto &cluster : cluster_indices)
+      {
+        
+        for (const auto &point_idx : cluster.indices)
+        {
+          cloud_cluster->points.push_back(pointcloud->points[point_idx]);
+        }
+        clusters.push_back(*cloud_cluster);
+        clusters.back().width = cloud_cluster->points.size();
+        clusters.back().height = 1;
+        clusters.back().is_dense = false;
+      }
     }
 
     // Convert to ROS data type
     sensor_msgs::msg::PointCloud2 output_msg;
-    pcl::toROSMsg(*cloud_filtered, output_msg);
-    // Add the same frame_id as the input, it is not included in pcl PointXYZI
+    pcl::toROSMsg(*pointcloud, output_msg);
+    // Add the same frame_id as the input, it is not included in pcl PointXYZ
     output_msg.header.frame_id = input_msg->header.frame_id;
     // Publish the data as a ROS message
     pub_lidar_->publish(output_msg);
+    // RCLCPP_INFO_STREAM(this->get_logger(), "PointCloud published");
   }
 
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_lidar_;
@@ -247,7 +224,11 @@ private:
   rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr sub_lidar_;
   OnSetParametersCallbackHandle::SharedPtr callback_handle_;
   float minX = -80.0, minY = -25.0, minZ = -2.0;
-  float maxX = +80.0, maxY = +25.0, maxZ = -0.15;
+  float maxX = 80.0, maxY = +25.0, maxZ = -0.15;
+  float tolerance_ = 0.02;
+  int min_cluster_size_ = 10;
+  int max_cluster_size_ = 500;
+  bool use_height_ = false;
   bool verbose1 = false, verbose2 = false;
   std::string points_in_topic, points_out_topic, marker_out_topic;
   size_t count_;
@@ -256,7 +237,7 @@ private:
 int main(int argc, char *argv[])
 {
   rclcpp::init(argc, argv);
-  rclcpp::spin(std::make_shared<DbscanSpatial>());
+  rclcpp::spin(std::make_shared<EucledianSpatial>());
   rclcpp::shutdown();
   return 0;
 }

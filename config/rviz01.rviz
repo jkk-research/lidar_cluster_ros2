@@ -6,10 +6,7 @@ Panels:
       Expanded:
         - /Global Options1
         - /Status1
-        - /MarkerArray1
         - /all points1
-        - /all points1/Status1
-        - /all points1/Topic1
         - /all points1/Autocompute Value Bounds1
         - /cluster1
       Splitter Ratio: 0.5
@@ -57,13 +54,13 @@ Visualization Manager:
       Enabled: true
       Name: MarkerArray
       Namespaces:
-        {}
+        search_start: true
       Topic:
         Depth: 5
         Durability Policy: Volatile
         History Policy: Keep Last
         Reliability Policy: Reliable
-        Value: /lexus3/pursuitviz
+        Value: /clustered_marker
       Value: true
     - Alpha: 1
       Autocompute Intensity Bounds: true
@@ -77,7 +74,7 @@ Visualization Manager:
       Color: 255; 255; 255
       Color Transformer: AxisColor
       Decay Time: 0
-      Enabled: true
+      Enabled: false
       Invert Rainbow: false
       Max Color: 255; 255; 255
       Max Intensity: 5606
@@ -95,10 +92,10 @@ Visualization Manager:
         Filter size: 10
         History Policy: Keep Last
         Reliability Policy: Best Effort
-        Value: /points
+        Value: /nonground
       Use Fixed Frame: true
       Use rainbow: true
-      Value: true
+      Value: false
     - Alpha: 1
       Autocompute Intensity Bounds: true
       Autocompute Value Bounds:
@@ -111,12 +108,12 @@ Visualization Manager:
       Color: 255; 255; 255
       Color Transformer: Intensity
       Decay Time: 0
-      Enabled: false
+      Enabled: true
       Invert Rainbow: false
       Max Color: 255; 255; 255
-      Max Intensity: 5964
+      Max Intensity: 9
       Min Color: 0; 0; 0
-      Min Intensity: 0
+      Min Intensity: -1
       Name: cluster
       Position Transformer: XYZ
       Selectable: true
@@ -129,10 +126,10 @@ Visualization Manager:
         Filter size: 10
         History Policy: Keep Last
         Reliability Policy: Best Effort
-        Value: /points
+        Value: /clustered_points
       Use Fixed Frame: true
       Use rainbow: true
-      Value: false
+      Value: true
     - Class: rviz_default_plugins/Image
       Enabled: true
       Max Value: 1
@@ -145,7 +142,7 @@ Visualization Manager:
         Durability Policy: Volatile
         History Policy: Keep Last
         Reliability Policy: Reliable
-        Value: /zed2i/zed_node/rgb/image_rect_color
+        Value: /zed2i/zed_node/right/image_rect_color
       Value: true
   Enabled: true
   Global Options:
@@ -231,5 +228,5 @@ Window Geometry:
   Views:
     collapsed: false
   Width: 1425
-  X: 198
-  Y: 52
+  X: 134
+  Y: -12

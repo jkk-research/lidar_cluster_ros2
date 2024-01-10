@@ -23,13 +23,13 @@ cd ~/ros2_ws
 Build either with:
 
 ``` bash
-colcon build --packages-select lidar_cluster
+colcon build --packages-select lidar_cluster --symlink-install
 ```
 
 or with optimized build:
 
 ``` bash
-MAKEFLAGS="-j4" colcon build --packages-select lidar_cluster --cmake-args -DCMAKE_BUILD_TYPE=Release
+MAKEFLAGS="-j4" colcon build --packages-select lidar_cluster --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=Release
 ```
 
 ## ROS 2 graph
@@ -40,8 +40,8 @@ graph LR;
 
     p[ /input_points<br/>sensor_msgs::PointCloud2]:::white --> cluster([ /cluster_node]):::light
     tf[ /tf <br/>optional topic]:::dash -.-> cluster
-    cluster --> f1[ /filtered_points<br/>sensor_msgs::PointCloud2]:::white
-    cluster --> f2[ /filtered_markers<br/>visualization_msgs::MarkerArray]:::white
+    cluster --> f1[ /clustered_points<br/>sensor_msgs::PointCloud2]:::white
+    cluster --> f2[ /clustered_marker<br/>visualization_msgs::MarkerArray]:::white
     classDef light fill:#34aec5,stroke:#152742,stroke-width:2px,color:#152742  
     classDef dark fill:#152742,stroke:#34aec5,stroke-width:2px,color:#34aec5
     classDef white fill:#ffffff,stroke:#152742,stroke-width:2px,color:#15274
@@ -49,12 +49,27 @@ graph LR;
     classDef red fill:#ef4638,stroke:#152742,stroke-width:2px,color:#fff
 ```
 ## Cluster nodes
-- `dbscan_spatial`: DBSCAN non-grid implementation.
-- `dbscan_grid`: DBSCAN grid implementation.
-- `dblane_spatial`: DBlane non-grid implementation. The [flowchart](https://github.com/jkk-research/lidar_cluster_ros2/blob/ros2/notebooks/flowchart.md) and the [notebooks](https://github.com/jkk-research/lidar_cluster_ros2/tree/ros2/notebooks) can help to understand the working principles.
+
+| Node | Clustering | Implementation | Description | Additional Resources |
+| --- | --- | --- | --- | --- |
+| `dbscan_spatial` | DBSCAN | spatial| DBSCAN non-grid implementation | |
+| `dbscan_grid` | DBSAN | grid | DBSCAN voxel-grid-based implementation | |
+| `dblane_spatial` | DBlane | spatial| DBlane non-grid implementation | [flowchart](https://github.com/jkk-research/lidar_cluster_ros2/blob/ros2/notebooks/flowchart.md), [notebooks](https://github.com/jkk-research/lidar_cluster_ros2/tree/ros2/notebooks) |
+| `dblane_f1s` | DBlane | formula | DBlane formula 1 student implementation | [notebooks](https://github.com/jkk-research/lidar_cluster_ros2/tree/ros2/notebooks) |
+| `eucledian_spatial` | Eucledian | spatial| PCL implementation of Eucledian clustering non-grid implementation | [PCL docs](https://pointclouds.org/documentation/group__segmentation.html) |
+| `eucledian_grid` | Eucledian | grid| PCL implementation of Eucledian clustering voxel-grid-based implementation | [PCL docs](https://pointclouds.org/documentation/group__segmentation.html) |
+
 
 ``` bash
 ros2 run lidar_cluster dblane_spatial
+```
+
+``` bash
+ros2 launch lidar_cluster dblane_spatial.launch.py
+```
+
+``` bash
+ros2 launch lidar_cluster dblane_f1s.launch.py topic:=/input_points
 ```
 
 ## Remarks

@@ -1,5 +1,5 @@
-// Non-grid (spatial) DBSCAN filter for point cloud data
-// The DBSCAN (Density-Based Spatial Clustering of Applications with Noise) algorithm is a popular clustering algorithm in machine learning
+// DBlane filter for point cloud data
+// formula 1 student version
 
 #include <chrono>
 #include <functional>
@@ -92,7 +92,7 @@ void find_clusters(std::vector<Point> &points, double eps)
     }
   }
 }
-class DbscanSpatial : public rclcpp::Node
+class DblaneFormula : public rclcpp::Node
 {
   rcl_interfaces::msg::SetParametersResult parametersCallback(const std::vector<rclcpp::Parameter> &parameters)
   {
@@ -126,10 +126,26 @@ class DbscanSpatial : public rclcpp::Node
       {
         maxZ = param.as_double();
       }
+      if (param.get_name() == "verbose1")
+      {
+        verbose1 = param.as_bool();
+      }
+      if (param.get_name() == "verbose2")
+      {
+        verbose2 = param.as_bool();
+      }
+      if (param.get_name() == "search_start_width_x")
+      {
+        search_start_width_x = param.as_double();
+      }
+      if (param.get_name() == "search_start_width_y")
+      {
+        search_start_width_y = param.as_double();
+      }
       if (param.get_name() == "points_in_topic")
       {
         points_in_topic = param.as_string();
-        sub_lidar_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(points_in_topic, rclcpp::SensorDataQoS().keep_last(1), std::bind(&DbscanSpatial::lidar_callback, this, std::placeholders::_1));
+        sub_lidar_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(points_in_topic, rclcpp::SensorDataQoS().keep_last(1), std::bind(&DblaneFormula::lidar_callback, this, std::placeholders::_1));
       }
       if (param.get_name() == "points_out_topic")
       {
@@ -146,7 +162,7 @@ class DbscanSpatial : public rclcpp::Node
   }
 
 public:
-  DbscanSpatial() : Node("dbscan_spatial"), count_(0)
+  DblaneFormula() : Node("dblane_f1s"), count_(0)
   {
     this->declare_parameter<float>("minX", minX);
     this->declare_parameter<float>("minY", minY);
@@ -159,6 +175,8 @@ public:
     this->declare_parameter<std::string>("marker_out_topic", "clustered_marker");
     this->declare_parameter<bool>("verbose1", verbose1);
     this->declare_parameter<bool>("verbose2", verbose2);
+    this->declare_parameter<float>("search_start_width_x", search_start_width_x);
+    this->declare_parameter<float>("search_start_width_y", search_start_width_y);
     this->get_parameter("minX", minX);
     this->get_parameter("minY", minY);
     this->get_parameter("minZ", minZ);
@@ -170,14 +188,16 @@ public:
     this->get_parameter("marker_out_topic", marker_out_topic);
     this->get_parameter("verbose1", verbose1);
     this->get_parameter("verbose2", verbose2);
+    this->get_parameter("search_start_width_x", search_start_width_x);
+    this->get_parameter("search_start_width_y", search_start_width_y);
 
     pub_lidar_ = this->create_publisher<sensor_msgs::msg::PointCloud2>(points_out_topic, 10);
     pub_marker_ = this->create_publisher<visualization_msgs::msg::MarkerArray>(marker_out_topic, 10);
     // TODO: QoS // rclcpp::SensorDataQoS().keep_last(1)
-    sub_lidar_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(points_in_topic, 10, std::bind(&DbscanSpatial::lidar_callback, this, std::placeholders::_1));
-    callback_handle_ = this->add_on_set_parameters_callback(std::bind(&DbscanSpatial::parametersCallback, this, std::placeholders::_1));
+    sub_lidar_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(points_in_topic, 10, std::bind(&DblaneFormula::lidar_callback, this, std::placeholders::_1));
+    callback_handle_ = this->add_on_set_parameters_callback(std::bind(&DblaneFormula::parametersCallback, this, std::placeholders::_1));
 
-    RCLCPP_INFO(this->get_logger(), "DbscanSpatial node has been started.");
+    RCLCPP_INFO(this->get_logger(), "DblaneFormula node has been started.");
     RCLCPP_INFO(this->get_logger(), "Subscribing to: '%s'", points_in_topic.c_str());
     RCLCPP_INFO(this->get_logger(), "Publishing to: '%s' and '%s'", points_out_topic.c_str(), marker_out_topic.c_str());
   }
@@ -208,14 +228,13 @@ private:
     // find neighbors in cloud
     std::vector<Point> points;
 
+
     for (const pcl::PointXYZI &p : cloud->points)
     {
-      {
         Point point;
         point.x = p.x;
         point.y = p.y;
         points.push_back(point);
-      }
     }
 
     find_neighbors(points, 3.5);
@@ -240,6 +259,49 @@ private:
     output_msg.header.frame_id = input_msg->header.frame_id;
     // Publish the data as a ROS message
     pub_lidar_->publish(output_msg);
+
+
+    // create marker array
+    visualization_msgs::msg::MarkerArray mark_array;
+    visualization_msgs::msg::Marker blue_left;
+    blue_left.header.frame_id = input_msg->header.frame_id;
+    blue_left.header.stamp = this->now();
+    blue_left.ns = "search_start";
+    blue_left.type = visualization_msgs::msg::Marker::CUBE;
+    blue_left.action = visualization_msgs::msg::Marker::MODIFY;
+    blue_left.scale.x = search_start_width_x;
+    blue_left.scale.y = search_start_width_y;
+    blue_left.scale.z = 0.2;
+    blue_left.color.r = md_blue_500_r;
+    blue_left.color.g = md_blue_500_g;
+    blue_left.color.b = md_blue_500_b;
+    blue_left.color.a = 0.8;
+    blue_left.id = 0;
+    blue_left.pose.position.x = 0.0;
+    blue_left.pose.position.y = -0.5 * search_start_width_y - 0.1;
+    blue_left.pose.position.z = 0.0;
+
+    visualization_msgs::msg::Marker amber_right;
+    amber_right.header.frame_id = input_msg->header.frame_id;
+    amber_right.header.stamp = this->now();
+    amber_right.ns = "search_start";
+    amber_right.type = visualization_msgs::msg::Marker::CUBE;
+    amber_right.action = visualization_msgs::msg::Marker::MODIFY;
+    amber_right.scale.x = search_start_width_x;
+    amber_right.scale.y = search_start_width_y;
+    amber_right.scale.z = 0.2;
+    amber_right.color.r = md_amber_500_r;
+    amber_right.color.g = md_amber_500_g;
+    amber_right.color.b = md_amber_500_b;
+    amber_right.color.a = 0.8;
+    amber_right.id = 1;
+    amber_right.pose.position.x = 0.0;
+    amber_right.pose.position.y = 0.5 * search_start_width_y + 0.1;
+    amber_right.pose.position.z = 0.0;
+
+    mark_array.markers.push_back(blue_left);
+    mark_array.markers.push_back(amber_right);
+    pub_marker_->publish(mark_array);
   }
 
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_lidar_;
@@ -249,14 +311,18 @@ private:
   float minX = -80.0, minY = -25.0, minZ = -2.0;
   float maxX = +80.0, maxY = +25.0, maxZ = -0.15;
   bool verbose1 = false, verbose2 = false;
+  float search_start_width_x = 4.5, search_start_width_y = 2.5;
   std::string points_in_topic, points_out_topic, marker_out_topic;
+  // colors from https://github.com/jkk-research/colors
+  const float md_amber_500_r = 1.00, md_amber_500_g = 0.76, md_amber_500_b = 0.03;
+  const float md_blue_500_r = 0.13, md_blue_500_g = 0.59, md_blue_500_b = 0.95;
   size_t count_;
 };
 
 int main(int argc, char *argv[])
 {
   rclcpp::init(argc, argv);
-  rclcpp::spin(std::make_shared<DbscanSpatial>());
+  rclcpp::spin(std::make_shared<DblaneFormula>());
   rclcpp::shutdown();
   return 0;
 }

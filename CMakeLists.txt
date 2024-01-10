@@ -64,6 +64,16 @@ target_link_libraries(dblane_spatial ${PCL_LIBRARIES})
 ament_target_dependencies(dblane_spatial  ${ament_dependencies} )
 target_compile_features(dblane_spatial PUBLIC c_std_99 cxx_std_17)  # Require C99 and C++17
 
+add_executable(eucledian_spatial src/eucledian_spatial.cpp)
+target_link_libraries(eucledian_spatial ${PCL_LIBRARIES})
+ament_target_dependencies(eucledian_spatial  ${ament_dependencies} )
+target_compile_features(eucledian_spatial PUBLIC c_std_99 cxx_std_17)  # Require C99 and C++17
+
+add_executable(dblane_f1s src/dblane_f1s.cpp)
+target_link_libraries(dblane_f1s ${PCL_LIBRARIES})
+ament_target_dependencies(dblane_f1s  ${ament_dependencies} )
+target_compile_features(dblane_f1s PUBLIC c_std_99 cxx_std_17)  # Require C99 and C++17
+
 
 install(DIRECTORY 
   launch
@@ -74,6 +84,8 @@ install(TARGETS
   dbscan_spatial
   dbscan_grid
   dblane_spatial
+  eucledian_spatial
+  dblane_f1s
   DESTINATION lib/${PROJECT_NAME})
 
 if(BUILD_TESTING)
