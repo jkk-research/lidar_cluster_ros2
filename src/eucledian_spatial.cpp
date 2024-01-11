@@ -161,10 +161,8 @@ private:
     if (!use_height_)
     {
       pcl::PointCloud<pcl::PointXYZ>::Ptr pointcloud_2d_ptr(new pcl::PointCloud<pcl::PointXYZ>);
-      int i = 0;
       for (const auto &point : pointcloud->points)
       {
-        //if (i > 60000 and i < 70000)
         {
           pcl::PointXYZ point2d;
           point2d.x = point.x;

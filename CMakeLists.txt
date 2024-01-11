@@ -33,6 +33,7 @@ set(INCLUDE_DIRS include
   ${std_msgs_INCLUDE_DIRS}
   ${sensor_msgs_INCLUDE_DIRS}
   ${rclcpp_components_INCLUDE_DIRS}
+  include
 )
 include_directories(${INCLUDE_DIRS})
 

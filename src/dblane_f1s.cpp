@@ -7,6 +7,7 @@
 #include <string>
 #include <cmath>
 #include <vector>
+#include <algorithm>
 // ROS
 #include "rclcpp/rclcpp.hpp"
 #include "sensor_msgs/msg/point_cloud2.hpp"
@@ -17,81 +18,12 @@
 #include <pcl/point_types.h>
 #include <pcl_conversions/pcl_conversions.h>
 #include <pcl/filters/crop_box.h>
+// Package
+#include "lidar_cluster/dblane.hpp"
 
 using namespace std::chrono_literals;
 using std::placeholders::_1;
 
-class Point
-{
-public:
-  double x, y;
-  int neighbor_pts = 0;
-  bool core = false;
-  int cluster_id = -1;
-};
-
-double distance(const Point &p1, const Point &p2)
-{
-  return std::sqrt(std::pow(p1.x - p2.x, 2) + std::pow(p1.y - p2.y, 2));
-}
-
-void find_neighbors(std::vector<Point> &points, double eps)
-{
-  for (Point &p : points)
-  {
-    for (const Point &q : points)
-    {
-      if (distance(p, q) <= eps)
-      {
-        p.neighbor_pts++;
-      }
-    }
-    p.core = p.neighbor_pts >= 3;
-  }
-}
-
-void find_clusters(std::vector<Point> &points, double eps)
-{
-  int actual_cluster_id = 0;
-  for (int i = 0; i < 10; i++)
-  {
-    for (Point &p : points)
-    {
-      if (p.core && p.cluster_id == -1)
-      {
-        p.cluster_id = actual_cluster_id;
-        break;
-      }
-    }
-    for (Point &p : points)
-    {
-      if (p.cluster_id == actual_cluster_id)
-      {
-        for (Point &q : points)
-        {
-          if (q.core && q.cluster_id == -1 && distance(p, q) <= eps)
-          {
-            q.cluster_id = actual_cluster_id;
-          }
-        }
-      }
-    }
-    actual_cluster_id++;
-  }
-  for (Point &p : points)
-  {
-    if (!p.core)
-    {
-      for (const Point &q : points)
-      {
-        if (q.core && q.cluster_id != -1 && distance(p, q) <= eps)
-        {
-          p.cluster_id = q.cluster_id;
-        }
-      }
-    }
-  }
-}
 class DblaneFormula : public rclcpp::Node
 {
   rcl_interfaces::msg::SetParametersResult parametersCallback(const std::vector<rclcpp::Parameter> &parameters)
@@ -224,42 +156,13 @@ private:
       RCLCPP_INFO_STREAM(this->get_logger(), "PointCloud in: " << original_size << " reduced size before cluster: " << cloud->width * cloud->height);
     }
 
-    // DBSCAN
-    // find neighbors in cloud
-    std::vector<Point> points;
-
-
-    for (const pcl::PointXYZI &p : cloud->points)
-    {
-        Point point;
-        point.x = p.x;
-        point.y = p.y;
-        points.push_back(point);
-    }
-
-    find_neighbors(points, 3.5);
-    // find clusters in cloud
-    find_clusters(points, 3.5);
-
-    // convert to PointXYZI
-    for (const Point &p : points)
-    {
-      pcl::PointXYZI point;
-      point.x = p.x;
-      point.y = p.y;
-      point.z = 0.0;
-      point.intensity = p.cluster_id;
-      cloud_filtered->points.push_back(point);
-    }
-
     // Convert to ROS data type
     sensor_msgs::msg::PointCloud2 output_msg;
-    pcl::toROSMsg(*cloud_filtered, output_msg);
+    pcl::toROSMsg(*cloud, output_msg);
     // Add the same frame_id as the input, it is not included in pcl PointXYZI
     output_msg.header.frame_id = input_msg->header.frame_id;
     // Publish the data as a ROS message
     pub_lidar_->publish(output_msg);
-
 
     // create marker array
     visualization_msgs::msg::MarkerArray mark_array;
@@ -299,8 +202,66 @@ private:
     amber_right.pose.position.y = 0.5 * search_start_width_y + 0.1;
     amber_right.pose.position.z = 0.0;
 
+    pcl::CropBox<pcl::PointXYZI> crop_start;
+    crop_start.setInputCloud(cloud);
+    crop_start.setMin(Eigen::Vector4f(-0.5 * search_start_width_x, -1.0 * search_start_width_y, minZ, 1.0));
+    crop_start.setMax(Eigen::Vector4f(+0.5 * search_start_width_x, +1.0 * search_start_width_y, maxZ, 1.0));
+    pcl::PointCloud<pcl::PointXYZI>::Ptr cloud_start(new pcl::PointCloud<pcl::PointXYZI>);
+    crop_start.filter(*cloud_start);
+    // RCLCPP_INFO_STREAM(this->get_logger(), "Start size: " << cloud_start->width * cloud_start->height);
+
+    // test DBlane
+    Cluster cluster1(std::vector<Point>(), 5, 1.2, 8.2, 60.0); // cluster_num, eps_min, eps_max, ang_threshold_deg
+    std::vector<Point> candidate_points;
+    for (pcl::PointXYZI p : cloud->points)
+    {
+      candidate_points.push_back(Point(p.x, p.y));
+    }
+    cluster1.candidate_points = candidate_points;
+
+    srand(time(NULL));
+    int random1 = rand() % cloud_start->size();
+    int random2 = rand() % cloud_start->size();
+
+    cluster1.add_back(cloud_start->points[random1].x, cloud_start->points[random1].y, 1);
+    cluster1.add_back(cloud_start->points[random2].x, cloud_start->points[random2].y, 1);
+    for(int i = 0; i < 5; i++){
+      cluster1.next_tail(1);
+      //cluster1.next_head(1);
+    }
+    RCLCPP_INFO_STREAM(this->get_logger(), "cluster1 size: " << cluster1.get_size(1) << " candidate size: " << cluster1.candidate_points.size());
+    // RCLCPP_INFO_STREAM(this->get_logger(), "x1: " << cloud_start->points[random1].x << " x2: " << cloud_start->points[random2].x);
+    // RCLCPP_INFO_STREAM(this->get_logger(), "tail: " << cluster1.get_tail_angle(1) << " head: " << cluster1.get_head_angle(1));
+    // RCLCPP_INFO_STREAM(this->get_logger(), "angle diff: " << cluster1.angle_diff(cluster1.get_tail_angle(1),  cluster1.get_head_angle(1)));
+    visualization_msgs::msg::Marker cluster1_marker;
+    cluster1_marker.header.frame_id = input_msg->header.frame_id;
+    cluster1_marker.header.stamp = this->now();
+    cluster1_marker.ns = "cluster1";
+    cluster1_marker.type = visualization_msgs::msg::Marker::LINE_LIST;
+    cluster1_marker.action = visualization_msgs::msg::Marker::MODIFY;
+    cluster1_marker.scale.x = 0.4;
+    cluster1_marker.color.r = md_amber_500_r;
+    cluster1_marker.color.g = md_amber_500_g;
+    cluster1_marker.color.b = md_amber_500_b;
+    cluster1_marker.color.a = 1.0;
+    cluster1_marker.id = 2;
+    cluster1_marker.pose.position.x = 0.0;
+    cluster1_marker.pose.position.y = 0.0;
+    cluster1_marker.pose.position.z = 0.0;
+    cluster1_marker.points.clear();
+    for(int i = 0; i < cluster1.get_size(1); i++){
+      geometry_msgs::msg::Point p;
+      p.x = cluster1.get_cluster_point(1, i).x;
+      p.y = cluster1.get_cluster_point(1, i).y;
+      p.z = 0.0;
+      cluster1_marker.points.push_back(p);
+    }
+
+
+
     mark_array.markers.push_back(blue_left);
     mark_array.markers.push_back(amber_right);
+    mark_array.markers.push_back(cluster1_marker);
     pub_marker_->publish(mark_array);
   }
 
@@ -311,7 +272,7 @@ private:
   float minX = -80.0, minY = -25.0, minZ = -2.0;
   float maxX = +80.0, maxY = +25.0, maxZ = -0.15;
   bool verbose1 = false, verbose2 = false;
-  float search_start_width_x = 4.5, search_start_width_y = 2.5;
+  float search_start_width_x = 20.0, search_start_width_y = 6.5;
   std::string points_in_topic, points_out_topic, marker_out_topic;
   // colors from https://github.com/jkk-research/colors
   const float md_amber_500_r = 1.00, md_amber_500_g = 0.76, md_amber_500_b = 0.03;

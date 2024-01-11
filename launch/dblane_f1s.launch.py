@@ -21,6 +21,8 @@ def generate_launch_description():
                 {'points_out_topic': 'clustered_points'},
                 {'marker_out_topic': 'clustered_marker'},
                 {'verbose1': True},
+                {'search_start_width_x': 20.0},
+                {'search_start_width_y': 6.5},
             ]
         )
     ])
