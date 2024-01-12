@@ -20,6 +20,7 @@
 #include <pcl/filters/crop_box.h>
 // Package
 #include "lidar_cluster/dblane.hpp"
+#include "lidar_cluster/marker.hpp"
 
 using namespace std::chrono_literals;
 using std::placeholders::_1;
@@ -109,6 +110,10 @@ public:
     this->declare_parameter<bool>("verbose2", verbose2);
     this->declare_parameter<float>("search_start_width_x", search_start_width_x);
     this->declare_parameter<float>("search_start_width_y", search_start_width_y);
+    this->declare_parameter<int>("cluster_num", cluster_num);
+    this->declare_parameter<float>("eps_min", eps_min);
+    this->declare_parameter<float>("eps_max", eps_max);
+    this->declare_parameter<float>("ang_threshold_deg", ang_threshold_deg);
     this->get_parameter("minX", minX);
     this->get_parameter("minY", minY);
     this->get_parameter("minZ", minZ);
@@ -122,6 +127,10 @@ public:
     this->get_parameter("verbose2", verbose2);
     this->get_parameter("search_start_width_x", search_start_width_x);
     this->get_parameter("search_start_width_y", search_start_width_y);
+    this->get_parameter("cluster_num", cluster_num);
+    this->get_parameter("eps_min", eps_min);
+    this->get_parameter("eps_max", eps_max);
+    this->get_parameter("ang_threshold_deg", ang_threshold_deg);
 
     pub_lidar_ = this->create_publisher<sensor_msgs::msg::PointCloud2>(points_out_topic, 10);
     pub_marker_ = this->create_publisher<visualization_msgs::msg::MarkerArray>(marker_out_topic, 10);
@@ -156,13 +165,7 @@ private:
       RCLCPP_INFO_STREAM(this->get_logger(), "PointCloud in: " << original_size << " reduced size before cluster: " << cloud->width * cloud->height);
     }
 
-    // Convert to ROS data type
-    sensor_msgs::msg::PointCloud2 output_msg;
-    pcl::toROSMsg(*cloud, output_msg);
-    // Add the same frame_id as the input, it is not included in pcl PointXYZI
-    output_msg.header.frame_id = input_msg->header.frame_id;
-    // Publish the data as a ROS message
-    pub_lidar_->publish(output_msg);
+
 
     // create marker array
     visualization_msgs::msg::MarkerArray mark_array;
@@ -211,7 +214,7 @@ private:
     // RCLCPP_INFO_STREAM(this->get_logger(), "Start size: " << cloud_start->width * cloud_start->height);
 
     // test DBlane
-    Cluster cluster1(std::vector<Point>(), 5, 1.2, 8.2, 60.0); // cluster_num, eps_min, eps_max, ang_threshold_deg
+    Cluster cluster1(std::vector<Point>(), cluster_num, eps_min, eps_max, ang_threshold_deg);
     std::vector<Point> candidate_points;
     for (pcl::PointXYZI p : cloud->points)
     {
@@ -249,20 +252,60 @@ private:
     cluster1_marker.pose.position.y = 0.0;
     cluster1_marker.pose.position.z = 0.0;
     cluster1_marker.points.clear();
-    for(int i = 0; i < cluster1.get_size(1); i++){
+    for(int i = 0; i < cluster1.get_size(1) - 1; i++){
       geometry_msgs::msg::Point p;
       p.x = cluster1.get_cluster_point(1, i).x;
       p.y = cluster1.get_cluster_point(1, i).y;
       p.z = 0.0;
       cluster1_marker.points.push_back(p);
+      p.x = cluster1.get_cluster_point(1, i + 1).x;
+      p.y = cluster1.get_cluster_point(1, i + 1).y;
+      p.z = 0.0;
+      cluster1_marker.points.push_back(p);
     }
+
+
+    // LIDAR looks backward, so the left side is positive y and the right side is negative y TODO: parameterize
+    pcl::CropBox<pcl::PointXYZI> crop_fwd;
+    crop_fwd.setInputCloud(cloud);
+    crop_fwd.setMin(Eigen::Vector4f(-8.0, -1.5, minZ, 1.0));
+    crop_fwd.setMax(Eigen::Vector4f(-0.1, +1.5, maxZ, 1.0));
+    pcl::PointCloud<pcl::PointXYZI>::Ptr cloud_fwd(new pcl::PointCloud<pcl::PointXYZI>);
+    crop_fwd.filter(*cloud_fwd);
+    RCLCPP_INFO_STREAM(this->get_logger(), "crop_fwd: " << cloud_fwd->width * cloud_fwd->height);
+
+    // get the smallest x value from cloud_fwd
+    float min_x = -10.0;
+    for (pcl::PointXYZI p : cloud_fwd->points)
+    {
+      if (p.x > min_x)
+      {
+        min_x = p.x;
+      }
+    }
+
+
+    visualization_msgs::msg::Marker debug1_marker;
+    init_debug_marker(debug1_marker, min_x, 0.0);
+    debug1_marker.header.frame_id = input_msg->header.frame_id;
+    debug1_marker.header.stamp = this->now();
 
 
 
     mark_array.markers.push_back(blue_left);
     mark_array.markers.push_back(amber_right);
     mark_array.markers.push_back(cluster1_marker);
+    mark_array.markers.push_back(debug1_marker);
     pub_marker_->publish(mark_array);
+
+    // Convert to ROS data type
+    sensor_msgs::msg::PointCloud2 output_msg;
+    pcl::toROSMsg(*cloud, output_msg);
+    // Add the same frame_id as the input, it is not included in pcl PointXYZI
+    output_msg.header.frame_id = input_msg->header.frame_id;
+    // Publish the data as a ROS message
+    pub_lidar_->publish(output_msg);
+
   }
 
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_lidar_;
@@ -274,6 +317,8 @@ private:
   bool verbose1 = false, verbose2 = false;
   float search_start_width_x = 20.0, search_start_width_y = 6.5;
   std::string points_in_topic, points_out_topic, marker_out_topic;
+  int cluster_num = 5; 
+  float eps_min = 1.2, eps_max = 8.2, ang_threshold_deg = 30.0;
   // colors from https://github.com/jkk-research/colors
   const float md_amber_500_r = 1.00, md_amber_500_g = 0.76, md_amber_500_b = 0.03;
   const float md_blue_500_r = 0.13, md_blue_500_g = 0.59, md_blue_500_b = 0.95;

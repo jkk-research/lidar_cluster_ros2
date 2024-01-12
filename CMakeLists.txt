@@ -25,7 +25,8 @@ find_package(pcl_conversions REQUIRED)
 # further dependencies manually.
 # find_package(<dependency> REQUIRED)
 
-set(INCLUDE_DIRS include 
+set(INCLUDE_DIRS 
+  include 
   ${ament_cmake_INCLUDE_DIRS} 
   ${rclcpp_INCLUDE_DIRS}
   ${pcl_ros_INCLUDE_DIRS} 
@@ -33,7 +34,6 @@ set(INCLUDE_DIRS include
   ${std_msgs_INCLUDE_DIRS}
   ${sensor_msgs_INCLUDE_DIRS}
   ${rclcpp_components_INCLUDE_DIRS}
-  include
 )
 include_directories(${INCLUDE_DIRS})
 
