@@ -144,12 +144,23 @@ public:
   }
 
 private:
+  pcl::PointCloud<pcl::PointXYZI>::Ptr crop_pcl(pcl::PointCloud<pcl::PointXYZI>::Ptr &cloud_in, double min_x_, double min_y_, double max_x_, double max_y_)
+  {
+    pcl::CropBox<pcl::PointXYZI> crop_fwd;
+    crop_fwd.setInputCloud(cloud_in);
+    crop_fwd.setMin(Eigen::Vector4f(min_x_, min_y_, -2.0, 1.0));
+    crop_fwd.setMax(Eigen::Vector4f(max_x_, max_y_, -0.1, 1.0));
+    pcl::PointCloud<pcl::PointXYZI>::Ptr cloud_cropped(new pcl::PointCloud<pcl::PointXYZI>);
+    crop_fwd.filter(*cloud_cropped);
+    // RCLCPP_INFO_STREAM(this->get_logger(), "crop_fwd: " << cloud_cropped->width * cloud_cropped->height);
+    return cloud_cropped;
+  }
+
   void lidar_callback(const sensor_msgs::msg::PointCloud2::ConstSharedPtr input_msg)
   {
     // Convert to PCL data type
     pcl::PointCloud<pcl::PointXYZI>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZI>);
     pcl::fromROSMsg(*input_msg, *cloud);
-    pcl::PointCloud<pcl::PointXYZI>::Ptr cloud_filtered(new pcl::PointCloud<pcl::PointXYZI>);
     int original_size = cloud->width * cloud->height;
 
     // Filter out points outside of the box
@@ -164,8 +175,6 @@ private:
       // print the length of the pointcloud
       RCLCPP_INFO_STREAM(this->get_logger(), "PointCloud in: " << original_size << " reduced size before cluster: " << cloud->width * cloud->height);
     }
-
-
 
     // create marker array
     visualization_msgs::msg::MarkerArray mark_array;
@@ -205,16 +214,13 @@ private:
     amber_right.pose.position.y = 0.5 * search_start_width_y + 0.1;
     amber_right.pose.position.z = 0.0;
 
-    pcl::CropBox<pcl::PointXYZI> crop_start;
-    crop_start.setInputCloud(cloud);
-    crop_start.setMin(Eigen::Vector4f(-0.5 * search_start_width_x, -1.0 * search_start_width_y, minZ, 1.0));
-    crop_start.setMax(Eigen::Vector4f(+0.5 * search_start_width_x, +1.0 * search_start_width_y, maxZ, 1.0));
     pcl::PointCloud<pcl::PointXYZI>::Ptr cloud_start(new pcl::PointCloud<pcl::PointXYZI>);
-    crop_start.filter(*cloud_start);
+    cloud_start = crop_pcl(cloud, -0.5 * search_start_width_x, -1.0 * search_start_width_y, +0.5 * search_start_width_x, +1.0 * search_start_width_y);
     // RCLCPP_INFO_STREAM(this->get_logger(), "Start size: " << cloud_start->width * cloud_start->height);
 
     // test DBlane
     Cluster cluster1(std::vector<Point>(), cluster_num, eps_min, eps_max, ang_threshold_deg);
+    double ang_threshold = ang_threshold_deg * M_PI / 180.0;
     std::vector<Point> candidate_points;
     for (pcl::PointXYZI p : cloud->points)
     {
@@ -222,20 +228,124 @@ private:
     }
     cluster1.candidate_points = candidate_points;
 
-    srand(time(NULL));
-    int random1 = rand() % cloud_start->size();
-    int random2 = rand() % cloud_start->size();
+    // LIDAR looks backward, so the left side is positive y and the right side is negative y TODO: parameterize
+    pcl::PointCloud<pcl::PointXYZI>::Ptr cloud_fwd(new pcl::PointCloud<pcl::PointXYZI>);
+    cloud_fwd = crop_pcl(cloud, -8.0, -1.5, -0.1, +1.5); // cloud, min_x, min_y, max_x, max_y
+    // RCLCPP_INFO_STREAM(this->get_logger(), "crop_fwd: " << cloud_fwd->width * cloud_fwd->height);
 
-    cluster1.add_back(cloud_start->points[random1].x, cloud_start->points[random1].y, 1);
-    cluster1.add_back(cloud_start->points[random2].x, cloud_start->points[random2].y, 1);
-    for(int i = 0; i < 5; i++){
-      cluster1.next_tail(1);
-      //cluster1.next_head(1);
+    // get the smallest x value from cloud_fwd
+    float min_x = -10.0;
+    for (pcl::PointXYZI p : cloud_fwd->points)
+    {
+      if (p.x > min_x)
+      {
+        min_x = p.x;
+      }
     }
-    RCLCPP_INFO_STREAM(this->get_logger(), "cluster1 size: " << cluster1.get_size(1) << " candidate size: " << cluster1.candidate_points.size());
-    // RCLCPP_INFO_STREAM(this->get_logger(), "x1: " << cloud_start->points[random1].x << " x2: " << cloud_start->points[random2].x);
-    // RCLCPP_INFO_STREAM(this->get_logger(), "tail: " << cluster1.get_tail_angle(1) << " head: " << cluster1.get_head_angle(1));
-    // RCLCPP_INFO_STREAM(this->get_logger(), "angle diff: " << cluster1.angle_diff(cluster1.get_tail_angle(1),  cluster1.get_head_angle(1)));
+    pcl::PointCloud<pcl::PointXYZI>::Ptr cloud_left(new pcl::PointCloud<pcl::PointXYZI>);
+    cloud_left = crop_pcl(cloud, -4.0, -3.5, -0.001, 0.0); // cloud, min_x, min_y, max_x, max_y
+    // RCLCPP_INFO_STREAM(this->get_logger(), "crop_left: " << cloud_left->width * cloud_left->height);
+    pcl::PointCloud<pcl::PointXYZI>::Ptr cloud_righ(new pcl::PointCloud<pcl::PointXYZI>);
+    cloud_righ = crop_pcl(cloud, -4.0, 0.0, -0.001, +3.5);
+
+    // get the largest y value from cloud_left
+    Point left_start(0.0, -10.0);
+    for (pcl::PointXYZI p : cloud_left->points)
+    {
+      if (p.y > left_start.y)
+      {
+        left_start.y = p.y;
+        left_start.x = p.x;
+      }
+    }
+    cluster1.add_back(left_start, 1);
+    // RCLCPP_INFO_STREAM(this->get_logger(), "left_start: " << left_start.x << ", " << left_start.y);
+    // get the smallest y value from cloud_righ
+    Point right_start(0.0, +10.0);
+    for (pcl::PointXYZI p : cloud_righ->points)
+    {
+      if (p.y < right_start.y)
+      {
+        right_start.y = p.y;
+        right_start.x = p.x;
+      }
+    }
+    cluster1.add_back(right_start, 2);
+    if (cluster1.get_size(1) >= 1)
+    {
+      for (pcl::PointXYZI pxyzi : cloud->points)
+      {
+        Point p(pxyzi.x, pxyzi.y);
+        if (eps_min <= cluster1.distance(p, left_start) && cluster1.distance(p, left_start) <= eps_max)
+        {
+          double candidate_ang = cluster1.calculate_angle(p, left_start);
+          double angle_difference = cluster1.angle_diff(candidate_ang, 0.0); // 0.0 rad is up on X axis
+          if (angle_difference < ang_threshold)
+          {
+            cluster1.add_back(p.x, p.y, 1);
+            break;
+          }
+        }
+      }
+    }
+    double tmp_angle_difference = -1.0;
+    if (cluster1.get_size(2) >= 1)
+    {
+      for (pcl::PointXYZI pxyzi : cloud->points)
+      {
+        Point p(pxyzi.x, pxyzi.y);
+        if (eps_min <= cluster1.distance(p, right_start) && cluster1.distance(p, right_start) <= eps_max)
+        {
+          double candidate_ang = cluster1.calculate_angle(p, right_start);
+          double angle_difference = cluster1.angle_diff(candidate_ang, 0.0); // 0.0 rad up on X axis
+          tmp_angle_difference = angle_difference;
+          if (angle_difference < ang_threshold)
+          {
+            cluster1.add_back(p.x, p.y, 2);
+
+            break;
+          }
+        }
+      }
+    }
+    if (cluster1.get_size(1) >= 2)
+    {
+      bool extending = true;
+      while (extending == true)
+      {
+        extending = cluster1.next_tail(1);
+      }
+    }
+    if (cluster1.get_size(2) >= 2)
+    {
+      bool extending = true;
+      while (extending == true)
+      {
+        extending = cluster1.next_tail(2);
+      }
+    }
+
+    // if (cluster1.get_size(1) >= 1)
+    // {
+    //   RCLCPP_INFO_STREAM(this->get_logger(), "cluster1(1) size: " << cluster1.get_size(1));
+    // }
+    // if (cluster1.get_size(2) >= 1)
+    // {
+    //   RCLCPP_INFO_STREAM(this->get_logger(), "cluster1(2) size: " << cluster1.get_size(2));
+    // }
+
+    visualization_msgs::msg::Marker debug1_marker, debug2_marker, debug_text_marker;
+    init_debug_marker(debug1_marker, left_start.x, left_start.y, 1);
+    debug1_marker.header.frame_id = input_msg->header.frame_id;
+    debug1_marker.header.stamp = this->now();
+    init_debug_marker(debug2_marker, right_start.x, right_start.y, 2);
+    debug2_marker.header.frame_id = input_msg->header.frame_id;
+    debug2_marker.header.stamp = this->now();
+    init_text_debug_marker(debug_text_marker);
+    debug_text_marker.header.frame_id = input_msg->header.frame_id;
+    debug_text_marker.header.stamp = this->now();
+    debug_text_marker.text = std::to_string(tmp_angle_difference);
+
     visualization_msgs::msg::Marker cluster1_marker;
     cluster1_marker.header.frame_id = input_msg->header.frame_id;
     cluster1_marker.header.stamp = this->now();
@@ -243,16 +353,17 @@ private:
     cluster1_marker.type = visualization_msgs::msg::Marker::LINE_LIST;
     cluster1_marker.action = visualization_msgs::msg::Marker::MODIFY;
     cluster1_marker.scale.x = 0.4;
-    cluster1_marker.color.r = md_amber_500_r;
-    cluster1_marker.color.g = md_amber_500_g;
-    cluster1_marker.color.b = md_amber_500_b;
+    cluster1_marker.color.r = md_blue_500_r;
+    cluster1_marker.color.g = md_blue_500_g;
+    cluster1_marker.color.b = md_blue_500_b;
     cluster1_marker.color.a = 1.0;
     cluster1_marker.id = 2;
     cluster1_marker.pose.position.x = 0.0;
     cluster1_marker.pose.position.y = 0.0;
     cluster1_marker.pose.position.z = 0.0;
     cluster1_marker.points.clear();
-    for(int i = 0; i < cluster1.get_size(1) - 1; i++){
+    for (int i = 0; i < cluster1.get_size(1) - 1; i++)
+    {
       geometry_msgs::msg::Point p;
       p.x = cluster1.get_cluster_point(1, i).x;
       p.y = cluster1.get_cluster_point(1, i).y;
@@ -264,38 +375,42 @@ private:
       cluster1_marker.points.push_back(p);
     }
 
-
-    // LIDAR looks backward, so the left side is positive y and the right side is negative y TODO: parameterize
-    pcl::CropBox<pcl::PointXYZI> crop_fwd;
-    crop_fwd.setInputCloud(cloud);
-    crop_fwd.setMin(Eigen::Vector4f(-8.0, -1.5, minZ, 1.0));
-    crop_fwd.setMax(Eigen::Vector4f(-0.1, +1.5, maxZ, 1.0));
-    pcl::PointCloud<pcl::PointXYZI>::Ptr cloud_fwd(new pcl::PointCloud<pcl::PointXYZI>);
-    crop_fwd.filter(*cloud_fwd);
-    RCLCPP_INFO_STREAM(this->get_logger(), "crop_fwd: " << cloud_fwd->width * cloud_fwd->height);
-
-    // get the smallest x value from cloud_fwd
-    float min_x = -10.0;
-    for (pcl::PointXYZI p : cloud_fwd->points)
+    visualization_msgs::msg::Marker cluster2_marker;
+    cluster2_marker.header.frame_id = input_msg->header.frame_id;
+    cluster2_marker.header.stamp = this->now();
+    cluster2_marker.ns = "cluster2";
+    cluster2_marker.type = visualization_msgs::msg::Marker::LINE_LIST;
+    cluster2_marker.action = visualization_msgs::msg::Marker::MODIFY;
+    cluster2_marker.scale.x = 0.4;
+    cluster2_marker.color.r = md_amber_500_r;
+    cluster2_marker.color.g = md_amber_500_g;
+    cluster2_marker.color.b = md_amber_500_b;
+    cluster2_marker.color.a = 1.0;
+    cluster2_marker.id = 2;
+    cluster2_marker.pose.position.x = 0.0;
+    cluster2_marker.pose.position.y = 0.0;
+    cluster2_marker.pose.position.z = 0.0;
+    cluster2_marker.points.clear();
+    for (int i = 0; i < cluster1.get_size(1) - 1; i++)
     {
-      if (p.x > min_x)
-      {
-        min_x = p.x;
-      }
+      geometry_msgs::msg::Point p;
+      p.x = cluster1.get_cluster_point(2, i).x;
+      p.y = cluster1.get_cluster_point(2, i).y;
+      p.z = 0.0;
+      cluster2_marker.points.push_back(p);
+      p.x = cluster1.get_cluster_point(2, i + 1).x;
+      p.y = cluster1.get_cluster_point(2, i + 1).y;
+      p.z = 0.0;
+      cluster2_marker.points.push_back(p);
     }
-
-
-    visualization_msgs::msg::Marker debug1_marker;
-    init_debug_marker(debug1_marker, min_x, 0.0);
-    debug1_marker.header.frame_id = input_msg->header.frame_id;
-    debug1_marker.header.stamp = this->now();
-
-
 
     mark_array.markers.push_back(blue_left);
     mark_array.markers.push_back(amber_right);
     mark_array.markers.push_back(cluster1_marker);
+    mark_array.markers.push_back(cluster2_marker);
+    mark_array.markers.push_back(debug_text_marker);
     mark_array.markers.push_back(debug1_marker);
+    mark_array.markers.push_back(debug2_marker);
     pub_marker_->publish(mark_array);
 
     // Convert to ROS data type
@@ -305,7 +420,6 @@ private:
     output_msg.header.frame_id = input_msg->header.frame_id;
     // Publish the data as a ROS message
     pub_lidar_->publish(output_msg);
-
   }
 
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_lidar_;
@@ -317,8 +431,8 @@ private:
   bool verbose1 = false, verbose2 = false;
   float search_start_width_x = 20.0, search_start_width_y = 6.5;
   std::string points_in_topic, points_out_topic, marker_out_topic;
-  int cluster_num = 5; 
-  float eps_min = 1.2, eps_max = 8.2, ang_threshold_deg = 30.0;
+  int cluster_num = 5;
+  float eps_min = 1.2, eps_max = 3.4, ang_threshold_deg = 30.0;
   // colors from https://github.com/jkk-research/colors
   const float md_amber_500_r = 1.00, md_amber_500_g = 0.76, md_amber_500_b = 0.03;
   const float md_blue_500_r = 0.13, md_blue_500_g = 0.59, md_blue_500_b = 0.95;

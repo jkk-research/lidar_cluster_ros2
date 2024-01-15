@@ -23,6 +23,9 @@ def generate_launch_description():
                 {'verbose1': True},
                 {'search_start_width_x': 20.0},
                 {'search_start_width_y': 6.5},
+                {'eps_min': 1.5},
+                {'esp_max': 4.0},
+                {'ang_threshold_deg': 35.0},
             ]
         )
     ])
