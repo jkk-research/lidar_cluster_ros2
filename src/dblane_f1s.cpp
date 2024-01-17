@@ -260,34 +260,43 @@ private:
       }
     }
     pcl::PointCloud<pcl::PointXYZI>::Ptr cloud_left(new pcl::PointCloud<pcl::PointXYZI>);
-    cloud_left = crop_pcl(cloud, -4.0, -3.5, -0.001, 0.0); // cloud, min_x, min_y, max_x, max_y
+    cloud_left = crop_pcl(cloud, -8.0, -4.5, -0.001, 0.0); // cloud, min_x, min_y, max_x, max_y
     // RCLCPP_INFO_STREAM(this->get_logger(), "crop_left: " << cloud_left->width * cloud_left->height);
-    pcl::PointCloud<pcl::PointXYZI>::Ptr cloud_righ(new pcl::PointCloud<pcl::PointXYZI>);
-    cloud_righ = crop_pcl(cloud, -4.0, 0.0, -0.001, +3.5);
+    pcl::PointCloud<pcl::PointXYZI>::Ptr cloud_right(new pcl::PointCloud<pcl::PointXYZI>);
+    cloud_right = crop_pcl(cloud, -8.0, 0.0, -0.001, +4.5);
 
     // get the largest y value from cloud_left
-    Point left_start(0.0, -10.0);
+    Point left_start(-50.0, -10.0);
+   
+      RCLCPP_INFO_STREAM(this->get_logger(), "cloud_left: " << cloud_left->width * cloud_left->height);
+      RCLCPP_INFO_STREAM(this->get_logger(), "cloud_right: " << cloud_right->width * cloud_right->height);
     for (pcl::PointXYZI p : cloud_left->points)
     {
-      if (p.y > left_start.y)
+      if (p.x > left_start.x) 
       {
         left_start.y = p.y;
         left_start.x = p.x;
       }
     }
-    cluster1.add_back(left_start, 1);
-    // RCLCPP_INFO_STREAM(this->get_logger(), "left_start: " << left_start.x << ", " << left_start.y);
-    // get the smallest y value from cloud_righ
-    Point right_start(0.0, +10.0);
-    for (pcl::PointXYZI p : cloud_righ->points)
+    if (cloud_left->width * cloud_left->height > 0.0) 
     {
-      if (p.y < right_start.y)
+    cluster1.add_back(left_start, 1);
+    }
+    RCLCPP_INFO_STREAM(this->get_logger(), "left_start: " << left_start.x << ", " << left_start.y);
+    // get the smallest y value from cloud_right
+    Point right_start(-50.0, +10.0);
+    for (pcl::PointXYZI p : cloud_right->points)
+    {
+      if (p.x > right_start.x) 
       {
         right_start.y = p.y;
         right_start.x = p.x;
       }
     }
+    if (cloud_right->width * cloud_right->height > 0.0)
+    {
     cluster1.add_back(right_start, 2);
+    }
     if (cluster1.get_size(1) >= 1)
     {
       for (pcl::PointXYZI pxyzi : cloud->points)
@@ -296,7 +305,7 @@ private:
         if (eps_min <= cluster1.distance(p, left_start) && cluster1.distance(p, left_start) <= eps_max)
         {
           double candidate_ang = cluster1.calculate_angle(p, left_start);
-          double angle_difference = cluster1.angle_diff(candidate_ang, 0.0); // 0.0 rad is up on X axis
+          double angle_difference = cluster1.angle_diff(candidate_ang, 0.0); // 0.0 rad is up on X axis  
           if (angle_difference < ang_threshold)
           {
             cluster1.add_back(p.x, p.y, 1);
@@ -342,14 +351,14 @@ private:
       }
     }
 
-    // if (cluster1.get_size(1) >= 1)
-    // {
-    //   RCLCPP_INFO_STREAM(this->get_logger(), "cluster1(1) size: " << cluster1.get_size(1));
-    // }
-    // if (cluster1.get_size(2) >= 1)
-    // {
-    //   RCLCPP_INFO_STREAM(this->get_logger(), "cluster1(2) size: " << cluster1.get_size(2));
-    // }
+    if (cluster1.get_size(1) >= 1)
+    {
+      RCLCPP_INFO_STREAM(this->get_logger(), "cluster1(1) size: " << cluster1.get_size(1));
+    }
+    if (cluster1.get_size(2) >= 1)
+    {
+      RCLCPP_INFO_STREAM(this->get_logger(), "cluster1(2) size: " << cluster1.get_size(2));
+    }
 
     visualization_msgs::msg::Marker debug1_marker, debug2_marker, debug_text_marker;
     init_debug_marker(debug1_marker, left_start.x, left_start.y, 1);
