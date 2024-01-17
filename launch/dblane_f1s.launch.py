@@ -20,12 +20,12 @@ def generate_launch_description():
                 {'points_in_topic': LaunchConfiguration("topic")},
                 {'points_out_topic': 'clustered_points'},
                 {'marker_out_topic': 'clustered_marker'},
-                {'verbose1': True},
+                {'verbose1': False},
                 {'search_start_width_x': 20.0},
                 {'search_start_width_y': 6.5},
-                {'eps_min': 1.5},
-                {'esp_max': 4.0},
-                {'ang_threshold_deg': 35.0},
+                {'eps_min': 2.2},
+                {'eps_max': 5.0},
+                {'ang_threshold_deg': 45.0},
             ]
         )
     ])

@@ -35,6 +35,23 @@ class DblaneFormula : public rclcpp::Node
     for (const auto &param : parameters)
     {
       RCLCPP_INFO_STREAM(this->get_logger(), "Param update: " << param.get_name().c_str() << ": " << param.value_to_string().c_str());
+        
+       if (param.get_name() == "eps_min")
+      {
+        eps_min = param.as_double();
+      }
+      if (param.get_name() == "eps_max")
+      {
+        eps_max = param.as_double();
+      }
+      if (param.get_name() == "ang_threshold_deg")
+      {
+        ang_threshold_deg = param.as_double();
+      }
+      if (param.get_name() == "cluster_num")
+      {
+        cluster_num = param.as_int();
+      }
       if (param.get_name() == "minX")
       {
         minX = param.as_double();
@@ -298,9 +315,9 @@ private:
         {
           double candidate_ang = cluster1.calculate_angle(p, right_start);
           double angle_difference = cluster1.angle_diff(candidate_ang, 0.0); // 0.0 rad up on X axis
-          tmp_angle_difference = angle_difference;
-          if (angle_difference < ang_threshold)
+          if ((angle_difference < ang_threshold) && (angle_difference > -1.0))
           {
+            tmp_angle_difference = angle_difference*(180/M_PI);
             cluster1.add_back(p.x, p.y, 2);
 
             break;
@@ -391,7 +408,7 @@ private:
     cluster2_marker.pose.position.y = 0.0;
     cluster2_marker.pose.position.z = 0.0;
     cluster2_marker.points.clear();
-    for (int i = 0; i < cluster1.get_size(1) - 1; i++)
+    for (int i = 0; i < cluster1.get_size(2) - 1; i++)
     {
       geometry_msgs::msg::Point p;
       p.x = cluster1.get_cluster_point(2, i).x;
