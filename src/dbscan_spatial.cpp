@@ -17,6 +17,8 @@
 #include <pcl/point_types.h>
 #include <pcl_conversions/pcl_conversions.h>
 #include <pcl/filters/crop_box.h>
+// ROS package
+#include "lidar_cluster/marker.hpp"
 
 using namespace std::chrono_literals;
 using std::placeholders::_1;
@@ -28,6 +30,13 @@ public:
   int neighbor_pts = 0;
   bool core = false;
   int cluster_id = -1;
+  /*
+      cluster_id is the cluster ID of the point:
+      -1: undecided values, not assigned to any cluster
+       0: unassigned values: already visited, but not assigned to any cluster
+       1: assigned to the first cluster
+       2: assigned to the second cluster and so on
+  */
 };
 
 double distance(const Point &p1, const Point &p2)
@@ -50,7 +59,7 @@ void find_neighbors(std::vector<Point> &points, double eps)
   }
 }
 
-void find_clusters(std::vector<Point> &points, double eps)
+int find_clusters(std::vector<Point> &points, double eps)
 {
   int actual_cluster_id = 0;
   for (int i = 0; i < 10; i++)
@@ -91,6 +100,7 @@ void find_clusters(std::vector<Point> &points, double eps)
       }
     }
   }
+  return actual_cluster_id;
 }
 class DbscanSpatial : public rclcpp::Node
 {
@@ -141,6 +151,18 @@ class DbscanSpatial : public rclcpp::Node
         marker_out_topic = param.as_string();
         pub_marker_ = this->create_publisher<visualization_msgs::msg::MarkerArray>(marker_out_topic, 10);
       }
+      if (param.get_name() == "verbose1")
+      {
+        verbose1 = param.as_bool();
+      }
+      if (param.get_name() == "verbose2")
+      {
+        verbose2 = param.as_bool();
+      }
+      if (param.get_name() == "pub_undecided")
+      {
+        pub_undecided = param.as_bool();
+      }
     }
     return result;
   }
@@ -159,6 +181,9 @@ public:
     this->declare_parameter<std::string>("marker_out_topic", "clustered_marker");
     this->declare_parameter<bool>("verbose1", verbose1);
     this->declare_parameter<bool>("verbose2", verbose2);
+    this->declare_parameter<bool>("pub_undecided", pub_undecided);
+    this->declare_parameter<double>("eps", eps);
+
     this->get_parameter("minX", minX);
     this->get_parameter("minY", minY);
     this->get_parameter("minZ", minZ);
@@ -170,6 +195,8 @@ public:
     this->get_parameter("marker_out_topic", marker_out_topic);
     this->get_parameter("verbose1", verbose1);
     this->get_parameter("verbose2", verbose2);
+    this->get_parameter("pub_undecided", pub_undecided);
+    this->get_parameter("eps", eps);
 
     pub_lidar_ = this->create_publisher<sensor_msgs::msg::PointCloud2>(points_out_topic, 10);
     pub_marker_ = this->create_publisher<visualization_msgs::msg::MarkerArray>(marker_out_topic, 10);
@@ -185,6 +212,7 @@ public:
 private:
   void lidar_callback(const sensor_msgs::msg::PointCloud2::ConstSharedPtr input_msg)
   {
+    visualization_msgs::msg::MarkerArray mark_array;
     // Convert to PCL data type
     pcl::PointCloud<pcl::PointXYZI>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZI>);
     pcl::fromROSMsg(*input_msg, *cloud);
@@ -218,19 +246,49 @@ private:
       }
     }
 
-    find_neighbors(points, 3.5);
+    find_neighbors(points, eps);
     // find clusters in cloud
-    find_clusters(points, 3.5);
+    int num_of_clusters = find_clusters(points, eps);
+
+    // create a vector of points for each cluster
+    std::vector<double> center_x(num_of_clusters + 1), center_y(num_of_clusters + 1);
+    std::vector<int> count(num_of_clusters + 1);
+    // init
+    for (int i = 0; i <= num_of_clusters; i++)
+    {
+      center_x[i] = 0.0;
+      center_y[i] = 0.0;
+      count[i] = 0;
+    }
 
     // convert to PointXYZI
     for (const Point &p : points)
     {
-      pcl::PointXYZI point;
-      point.x = p.x;
-      point.y = p.y;
-      point.z = 0.0;
-      point.intensity = p.cluster_id;
-      cloud_filtered->points.push_back(point);
+      // undecided and unassigned (cluster_id -1 and 0) points are not published if pub_undecided is false
+      if (p.cluster_id > 0 or pub_undecided)
+      {
+        pcl::PointXYZI point;
+        point.x = p.x;
+        point.y = p.y;
+        point.z = 0.0;
+        point.intensity = p.cluster_id;
+        center_x[p.cluster_id + 1] += p.x;
+        center_y[p.cluster_id + 1] += p.y;
+        count[p.cluster_id + 1]++;
+        cloud_filtered->points.push_back(point);
+      }
+    }
+    for (int i = 1; i <= num_of_clusters; i++)
+    {
+      if (count[i] > 0) {
+        center_x[i] /= count[i];
+        center_y[i] /= count[i];
+        visualization_msgs::msg::Marker center_marker;
+        init_center_marker(center_marker, center_x[i], center_y[i], i);
+        center_marker.header.frame_id = input_msg->header.frame_id;
+        center_marker.header.stamp = this->now();
+        mark_array.markers.push_back(center_marker);
+      }
     }
 
     // Convert to ROS data type
@@ -240,6 +298,7 @@ private:
     output_msg.header.frame_id = input_msg->header.frame_id;
     // Publish the data as a ROS message
     pub_lidar_->publish(output_msg);
+    pub_marker_->publish(mark_array);
   }
 
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_lidar_;
@@ -248,7 +307,8 @@ private:
   OnSetParametersCallbackHandle::SharedPtr callback_handle_;
   float minX = -80.0, minY = -25.0, minZ = -2.0;
   float maxX = +80.0, maxY = +25.0, maxZ = -0.15;
-  bool verbose1 = false, verbose2 = false;
+  double eps = 3.5;
+  bool verbose1 = false, verbose2 = false, pub_undecided = false;
   std::string points_in_topic, points_out_topic, marker_out_topic;
   size_t count_;
 };

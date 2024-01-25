@@ -27,6 +27,8 @@
 #include <pcl/kdtree/kdtree.h>
 #include <pcl/segmentation/extract_clusters.h>
 #include <pcl/filters/crop_box.h>
+// ROS package
+#include "lidar_cluster/marker.hpp"
 
 using namespace std::chrono_literals;
 using std::placeholders::_1;
@@ -80,6 +82,32 @@ class EucledianSpatial : public rclcpp::Node
         marker_out_topic = param.as_string();
         pub_marker_ = this->create_publisher<visualization_msgs::msg::MarkerArray>(marker_out_topic, 10);
       }
+      if (param.get_name() == "verbose1")
+      {
+        verbose1 = param.as_bool();
+      }
+      if (param.get_name() == "verbose2")
+      {
+        verbose2 = param.as_bool();
+      }
+      if (param.get_name() == "tolerance")
+      {
+        tolerance_ = param.as_double();
+      }
+      if (param.get_name() == "min_cluster_size")
+      {
+        min_cluster_size_ = param.as_int();
+      }
+      if (param.get_name() == "max_cluster_size")
+      {
+        max_cluster_size_ = param.as_int();
+      }
+      if (param.get_name() == "use_height")
+      {
+        use_height_ = param.as_bool();
+      }
+      
+      
     }
     return result;
   }
@@ -132,16 +160,15 @@ public:
 private:
   void lidar_callback(const sensor_msgs::msg::PointCloud2::ConstSharedPtr input_msg)
   {
+    visualization_msgs::msg::MarkerArray mark_array;
     // Convert to PCL data type
     pcl::PointCloud<pcl::PointXYZ>::Ptr pointcloud(new pcl::PointCloud<pcl::PointXYZ>); // not PointXYZI
     pcl::PointCloud<pcl::PointXYZ>::ConstPtr pointcloud_ptr(new pcl::PointCloud<pcl::PointXYZ>);
     pcl::fromROSMsg(*input_msg, *pointcloud);
-    std::vector<pcl::PointCloud<pcl::PointXYZ>> clusters;
+    std::vector<pcl::PointCloud<pcl::PointXYZI>> clusters;
     pcl::PointCloud<pcl::PointXYZ>::Ptr pointcloud_filtered(new pcl::PointCloud<pcl::PointXYZ>);
 
     int original_size = pointcloud->width * pointcloud->height;
-
-
 
     // Filter out points outside of the box
     pcl::CropBox<pcl::PointXYZ> crop;
@@ -155,7 +182,6 @@ private:
       // print the length of the point pointcloud
       RCLCPP_INFO_STREAM(this->get_logger(), "PointCloud in: " << original_size << " Reduced size: " << pointcloud->width * pointcloud->height);
     }
-
 
     // convert 2d pointcloud
     if (!use_height_)
@@ -190,31 +216,58 @@ private:
     pcl_euclidean_cluster.setSearchMethod(tree);
     pcl_euclidean_cluster.setInputCloud(pointcloud_ptr);
     pcl_euclidean_cluster.extract(cluster_indices);
-    // build output
-    pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_cluster(new pcl::PointCloud<pcl::PointXYZ>);
+    
+    // get number of clusters
+    int num_clusters = cluster_indices.size();
+    if (verbose2)
     {
-      for (const auto &cluster : cluster_indices)
+      RCLCPP_INFO_STREAM(this->get_logger(), "Number of clusters: " << num_clusters);
+    }
+
+    mark_array.markers.clear();
+
+    // build output
+    pcl::PointCloud<pcl::PointXYZI>::Ptr cloud_cluster(new pcl::PointCloud<pcl::PointXYZI>);
+    int intensity = 0;
+    for (const auto &cluster : cluster_indices)
+    {
+      intensity++;
+      double center_x = 0.0, center_y = 0.0;
+      int count = 0;
+      for (const auto &point_idx : cluster.indices)
       {
-        
-        for (const auto &point_idx : cluster.indices)
-        {
-          cloud_cluster->points.push_back(pointcloud->points[point_idx]);
-        }
-        clusters.push_back(*cloud_cluster);
-        clusters.back().width = cloud_cluster->points.size();
-        clusters.back().height = 1;
-        clusters.back().is_dense = false;
+        // convert pointcloud->points[point_idx] to PointXYZI
+        pcl::PointXYZI pxyzi;
+        pxyzi.x = pointcloud->points[point_idx].x;
+        pxyzi.y = pointcloud->points[point_idx].y;
+        pxyzi.z = pointcloud->points[point_idx].z;
+        pxyzi.intensity = intensity;
+        center_x += pxyzi.x;
+        center_y += pxyzi.y;
+        count++;
+        cloud_cluster->points.push_back(pxyzi);
       }
+      clusters.push_back(*cloud_cluster);
+      clusters.back().width = cloud_cluster->points.size();
+      clusters.back().height = 1;
+      clusters.back().is_dense = false;
+      center_x /= count;
+      center_y /= count;
+      visualization_msgs::msg::Marker center_marker;
+      init_center_marker(center_marker, center_x, center_y, intensity);
+      center_marker.header.frame_id = input_msg->header.frame_id;
+      center_marker.header.stamp = this->now();
+      mark_array.markers.push_back(center_marker);     
     }
 
     // Convert to ROS data type
     sensor_msgs::msg::PointCloud2 output_msg;
-    pcl::toROSMsg(*pointcloud, output_msg);
+    pcl::toROSMsg(*cloud_cluster, output_msg);
     // Add the same frame_id as the input, it is not included in pcl PointXYZ
     output_msg.header.frame_id = input_msg->header.frame_id;
     // Publish the data as a ROS message
     pub_lidar_->publish(output_msg);
-    // RCLCPP_INFO_STREAM(this->get_logger(), "PointCloud published");
+    pub_marker_->publish(mark_array);
   }
 
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_lidar_;
