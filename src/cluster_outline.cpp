@@ -127,6 +127,46 @@ void ClusterOutline::computeOutline(pcl::PointCloud<pcl::PointXYZI>::Ptr& pointc
         }
         // Add the marker to the array
         hull_markers.markers.push_back(hull_marker);
+        // **Add a TEXT_VIEW_FACING marker for distance**
+
+        // Find the center of the cluster (mean of all points)
+        pcl::PointXYZ centroid(0.0, 0.0, 0.0);
+        for (const auto& point : cluster.second->points) {
+            centroid.x += point.x;
+            centroid.y += point.y;
+        }
+        centroid.x /= cluster.second->points.size();
+        centroid.y /= cluster.second->points.size();
+
+        // Calculate the distance from the origin (0,0) to the cluster center
+        double distance = calculateDistance(pcl::PointXYZ(0, 0, 0), centroid);
+
+        // Create the TEXT_VIEW_FACING marker
+        visualization_msgs::msg::Marker distance_marker;
+        distance_marker.header.frame_id = frame_id;
+        distance_marker.header.stamp = rclcpp::Clock().now();
+        distance_marker.ns = "distance";
+        distance_marker.id = cluster_id++;  // Increment the ID for unique markers
+        distance_marker.type = visualization_msgs::msg::Marker::TEXT_VIEW_FACING;
+        distance_marker.action = visualization_msgs::msg::Marker::ADD;
+        distance_marker.scale.z = 2;  
+        distance_marker.color.a = 1.0;
+        distance_marker.color.r = 1.0;
+        distance_marker.color.g = 1.0;
+        distance_marker.color.b = 1.0;
+
+        // Set the position of the text marker to the cluster centroid with an offset in z
+        distance_marker.pose.position.x = centroid.x;
+        distance_marker.pose.position.y = centroid.y;
+        distance_marker.pose.position.z = 1;  // Place text slightly above the hull marker
+
+        // Format the distance to one decimal place and add 'm' for meters
+        std::stringstream stream;
+        stream << std::fixed << std::setprecision(1) << distance;
+        distance_marker.text = stream.str() + "m";
+
+        // Add the distance marker to the array
+        hull_markers.markers.push_back(distance_marker);
     }
     // Add markers for clusters that are not present in the current frame to avoid ghost markers   
     visualization_msgs::msg::Marker hull_marker;
