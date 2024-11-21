@@ -29,6 +29,7 @@
 #include <tbb/tbb.h>
 
 #include "cluster_outline.hpp"
+#include "rclcpp_components/register_node_macro.hpp"
 
 // Function to create a voxel grid from a point cloud
 pcl::PointCloud<pcl::PointXYZ>::Ptr createVoxelGrid(
@@ -118,6 +119,8 @@ std::unordered_map<int, int> mapClusterIndices(
   return cluster_index_map;
 }
 
+namespace cluster {
+
 class EuclideanGrid : public rclcpp::Node
 {
   rcl_interfaces::msg::SetParametersResult parametersCallback(const std::vector<rclcpp::Parameter> &parameters)
@@ -200,7 +203,7 @@ class EuclideanGrid : public rclcpp::Node
   }
 
 public:
-  EuclideanGrid() : Node("euclidean_grid"), count_(0)
+  EuclideanGrid(const rclcpp::NodeOptions& options) : Node("euclidean_grid", options), count_(0)
   {
     this->declare_parameter<float>("minX", minX);
     this->declare_parameter<float>("minY", minY);
@@ -394,10 +397,6 @@ private:
   size_t count_;
 };
 
-int main(int argc, char *argv[])
-{
-  rclcpp::init(argc, argv);
-  rclcpp::spin(std::make_shared<EuclideanGrid>());
-  rclcpp::shutdown();
-  return 0;
-}
+} // namespace cluster
+
+RCLCPP_COMPONENTS_REGISTER_NODE(cluster::EuclideanGrid)
