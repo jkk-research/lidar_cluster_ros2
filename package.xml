@@ -12,8 +12,6 @@
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>
   <exec_depend>ros2launch</exec_depend>
-  <build_depend>benchmark</build_depend>
-  <exec_depend>benchmark</exec_depend>
   <depend>rclcpp</depend>
   <depend>std_msgs</depend>
   <depend>sensor_msgs</depend>

@@ -21,7 +21,6 @@ find_package(tf2_geometry_msgs REQUIRED)
 find_package(pcl_ros REQUIRED)
 find_package(pcl_conversions REQUIRED) 
 find_package(rclcpp_components REQUIRED)
-find_package(benchmark REQUIRED)
 
 # uncomment the following section in order to fill in
 # further dependencies manually.
@@ -53,8 +52,6 @@ set(ament_dependencies
   rclcpp_components
 )
 
-
-
 # Add benchmark source files
 set(BENCHMARK_SOURCES
   src/benchmark.cpp
@@ -65,25 +62,6 @@ set(OUTLINE_SOURCES
   src/cluster_outline.cpp
   include/cluster_outline.hpp
 )
-
-add_library(${PROJECT_NAME} SHARED
-  src/euclidean_grid_component.cpp
-)
-target_link_libraries(${PROJECT_NAME}
-  ${rclcpp_LIBRARIES}
-  benchmark
-)
-
-add_library(euclidean_grid_component SHARED src/euclidean_grid.cpp)
-target_compile_definitions(euclidean_grid_component PRIVATE "LIDAR_CLUSTER_BUILDING_DLL")
-ament_target_dependencies(euclidean_grid_component rclcpp rclcpp_components sensor_msgs visualization_msgs pcl_conversions pcl_ros)
-rclcpp_components_register_nodes(euclidean_grid_component "cluster::EuclideanGrid")
-
-# rclcpp_components_register_node(
-#   euclidean_grid_composable_node
-#     PLUGIN "cluster::EuclideanGrid"
-#     EXECUTABLE euclidean_grid_component
-# )
 
 add_executable(dbscan_spatial src/dbscan_spatial.cpp ${BENCHMARK_SOURCES} ${OUTLINE_SOURCES})
 target_link_libraries(dbscan_spatial ${PCL_LIBRARIES})
@@ -110,6 +88,22 @@ target_link_libraries(dblane_f1s ${PCL_LIBRARIES})
 ament_target_dependencies(dblane_f1s  ${ament_dependencies} )
 target_compile_features(dblane_f1s PUBLIC c_std_99 cxx_std_17)  # Require C99 and C++17
 
+add_executable(euclidean_grid src/euclidean_grid.cpp ${BENCHMARK_SOURCES} ${OUTLINE_SOURCES})
+target_link_libraries(euclidean_grid ${PCL_LIBRARIES})
+ament_target_dependencies(euclidean_grid  ${ament_dependencies} )
+target_compile_features(euclidean_grid PUBLIC c_std_99 cxx_std_17)  # Require C99 and C++17
+
+add_library(euclidean_grid_composable SHARED  src/euclidean_grid_composable.cpp ${BENCHMARK_SOURCES} ${OUTLINE_SOURCES})
+target_include_directories(euclidean_grid_composable PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>)
+
+target_link_libraries(euclidean_grid_composable ${PCL_LIBRARIES})
+ament_target_dependencies(euclidean_grid_composable ${ament_dependencies})
+rclcpp_components_register_nodes(euclidean_grid_composable
+PLUGIN "EuclideanGrid"
+EXECUTABLE euclidean_grid_composable)
+
 
 install(DIRECTORY 
   launch
@@ -122,7 +116,7 @@ install(TARGETS
   dblane_spatial
   euclidean_spatial
   dblane_f1s
-  euclidean_grid_component
+  euclidean_grid
   DESTINATION lib/${PROJECT_NAME})
 
 if(BUILD_TESTING)
@@ -137,9 +131,11 @@ if(BUILD_TESTING)
   ament_lint_auto_find_test_dependencies()
 endif()
 
+ament_export_targets(export_euclidean_grid_composable)
+install(TARGETS euclidean_grid_composable
+        EXPORT export_euclidean_grid_composable
+        ARCHIVE DESTINATION lib
+        LIBRARY DESTINATION lib
+        RUNTIME DESTINATION bin)
+
 ament_package()
-install(TARGETS euclidean_grid_component
-  ARCHIVE DESTINATION lib
-  LIBRARY DESTINATION lib
-  RUNTIME DESTINATION bin
-)
