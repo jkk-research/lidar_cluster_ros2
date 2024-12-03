@@ -146,7 +146,7 @@ void ClusterOutline::computeOutline(pcl::PointCloud<pcl::PointXYZI>::Ptr& pointc
         distance_marker.header.frame_id = frame_id;
         distance_marker.header.stamp = rclcpp::Clock().now();
         distance_marker.ns = "distance";
-        distance_marker.id = cluster_id++;  // Increment the ID for unique markers
+        distance_marker.id = cluster_id;  // Use the same ID as the hull marker
         distance_marker.type = visualization_msgs::msg::Marker::TEXT_VIEW_FACING;
         distance_marker.action = visualization_msgs::msg::Marker::ADD;
         distance_marker.scale.z = 2;  
@@ -177,9 +177,25 @@ void ClusterOutline::computeOutline(pcl::PointCloud<pcl::PointXYZI>::Ptr& pointc
     hull_marker.scale.x = 0.2;
     hull_marker.scale.y = 0.2;
     hull_marker.scale.z = 0.2;
-    for(int i = clusters.size() + 1 ; i < max_clust_reached; i++) {
+    hull_marker.type = visualization_msgs::msg::Marker::LINE_STRIP;
+    hull_marker.action = visualization_msgs::msg::Marker::MODIFY;
+    for(int i = clusters.size() + 1 ; i <= max_clust_reached; i++) {
         hull_marker.id = cluster_id++;
         hull_markers.markers.push_back(hull_marker);
+    }
+    // Add text markers for clusters that are not present in the current frame to avoid ghost markers
+    visualization_msgs::msg::Marker distance_marker;
+    distance_marker.header.stamp = rclcpp::Clock().now();
+    distance_marker.header.frame_id = frame_id;
+    distance_marker.ns = "distance";
+    distance_marker.color.a = 0.0;    // alpha = 0.0 makes the marker invisible
+    distance_marker.scale.z = 2;
+    distance_marker.type = visualization_msgs::msg::Marker::TEXT_VIEW_FACING;
+    distance_marker.action = visualization_msgs::msg::Marker::MODIFY;
+    cluster_id = clusters.size();
+    for(int i = clusters.size() + 1 ; i <= max_clust_reached; i++) {
+        distance_marker.id = cluster_id++;
+        hull_markers.markers.push_back(distance_marker);
     }
 
 }

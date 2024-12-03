@@ -324,7 +324,7 @@ private:
         cloud_filtered->points.push_back(point_i);
       }
     }
-    max_clust_reached = std::max(prev_cluster_size, num_of_clusters);
+    max_clust_reached = std::max(max_clust_reached, num_of_clusters);
     
     std::vector<double> center_x(num_of_clusters + 1), center_y(num_of_clusters + 1);
     std::vector<int> count(num_of_clusters + 1);
@@ -377,7 +377,6 @@ private:
     output_msg.header.frame_id = input_msg->header.frame_id;
     pub_lidar_->publish(output_msg);
     pub_marker_->publish(mark_array);
-    prev_cluster_size = num_of_clusters;
   } // EuclideanGrid::lidar_callback
 
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_lidar_;
@@ -389,7 +388,7 @@ private:
   float minX = -80.0, minY = -25.0, minZ = -2.0;
   float maxX = +80.0, maxY = +25.0, maxZ = -0.15;
   float tolerance = 5;
-  int max_cluster_size = 400, max_clust_reached = 0, prev_cluster_size = 0;
+  int max_cluster_size = 400, max_clust_reached = 0;
   float voxel_leaf_size = 3.0;
   int min_points_number_per_voxel = 5;
   bool verbose1 = false, verbose2 = false, pub_undecided = false;
