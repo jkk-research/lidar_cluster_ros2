@@ -110,6 +110,13 @@ install(DIRECTORY
   config
   DESTINATION share/${PROJECT_NAME})
 
+ament_export_targets(export_euclidean_grid_composable)
+install(TARGETS euclidean_grid_composable
+        EXPORT export_euclidean_grid_composable
+        ARCHIVE DESTINATION lib
+        LIBRARY DESTINATION lib
+        RUNTIME DESTINATION bin)
+
 install(TARGETS 
   dbscan_spatial
   dbscan_grid
@@ -131,11 +138,5 @@ if(BUILD_TESTING)
   ament_lint_auto_find_test_dependencies()
 endif()
 
-ament_export_targets(export_euclidean_grid_composable)
-install(TARGETS euclidean_grid_composable
-        EXPORT export_euclidean_grid_composable
-        ARCHIVE DESTINATION lib
-        LIBRARY DESTINATION lib
-        RUNTIME DESTINATION bin)
 
 ament_package()

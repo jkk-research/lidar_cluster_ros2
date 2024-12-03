@@ -203,7 +203,7 @@ class EuclideanGrid : public rclcpp::Node
   }
 
 public:
-  EuclideanGrid(const rclcpp::NodeOptions& options) : Node("euclidean_grid", options), count_(0)
+  EuclideanGrid() : Node("euclidean_grid"), count_(0)
   {
     this->declare_parameter<float>("minX", minX);
     this->declare_parameter<float>("minY", minY);
@@ -399,4 +399,10 @@ private:
 
 } // namespace cluster
 
-RCLCPP_COMPONENTS_REGISTER_NODE(cluster::EuclideanGrid)
+int main(int argc, char *argv[])
+{
+  rclcpp::init(argc, argv);
+  rclcpp::spin(std::make_shared<cluster::EuclideanGrid>());
+  rclcpp::shutdown();
+  return 0;
+}
