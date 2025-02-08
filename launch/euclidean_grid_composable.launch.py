@@ -12,7 +12,7 @@ def generate_launch_description():
         composable_node_descriptions=[
             ComposableNode(
                 package='lidar_cluster',
-                plugin='EuclideanGrid',
+                plugin='cluster::EuclideanGridCore',
                 name='euclidean_grid_filter_composable_unique',
                 #namespace='euclidean_grid_filter_ns',
                 extra_arguments=[{'use_intra_process_comms': True}],
