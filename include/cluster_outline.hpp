@@ -26,7 +26,9 @@ public:
 // The input pointcloud has to be PointXYZI where Intensity is the cluster ID.
 // max_added_points is the maximum number of points that can be added to the hull
 void computeOutline(pcl::PointCloud<pcl::PointXYZI>::Ptr& pointcloud, 
-                        visualization_msgs::msg::MarkerArray& hull_markers, int max_added_points, int max_clust_reached, std::string frame_id);
+                        visualization_msgs::msg::MarkerArray& hull_markers, 
+                        int max_added_points, int max_clust_reached, 
+                        std::string frame_id, float marker_height = -1.0);
 
 
 }; // class ClusterOutline

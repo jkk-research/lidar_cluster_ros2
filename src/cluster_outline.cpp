@@ -59,7 +59,7 @@ void ClusterOutline::addPointsIfNecessary(pcl::PointCloud<pcl::PointXYZ>::Ptr& h
 
 
 void ClusterOutline::computeOutline(pcl::PointCloud<pcl::PointXYZI>::Ptr& pointcloud, 
-                    visualization_msgs::msg::MarkerArray& hull_markers, int max_added_points, int max_clust_reached, std::string frame_id) {
+                    visualization_msgs::msg::MarkerArray& hull_markers, int max_added_points, int max_clust_reached, std::string frame_id, float marker_height) {
 
 
     // Map to store clusters, with the intensity as the key and the points as the value
@@ -128,7 +128,7 @@ void ClusterOutline::computeOutline(pcl::PointCloud<pcl::PointXYZI>::Ptr& pointc
             geometry_msgs::msg::Point p;
             p.x = point.x;
             p.y = point.y;
-            p.z = -1; // a z value of -1 is around the bumper height
+            p.z = marker_height; // a z value of -1 is around the bumper height
             hull_marker.points.push_back(p);
             p.z = -2; // a z value of -2 is around the ground height
             hull_marker_g.points.push_back(p);
@@ -153,7 +153,7 @@ void ClusterOutline::computeOutline(pcl::PointCloud<pcl::PointXYZI>::Ptr& pointc
             geometry_msgs::msg::Point p1;
             p1.x = cloud_hull->points[i].x;
             p1.y = cloud_hull->points[i].y;
-            p1.z = -1;
+            p1.z = marker_height;
 
             geometry_msgs::msg::Point p2;
             p2.x = cloud_hull->points[i].x;
@@ -169,7 +169,7 @@ void ClusterOutline::computeOutline(pcl::PointCloud<pcl::PointXYZI>::Ptr& pointc
             geometry_msgs::msg::Point p;
             p.x = cloud_hull->points[0].x;
             p.y = cloud_hull->points[0].y;
-            p.z = -1;
+            p.z = marker_height;
             hull_marker.points.push_back(p);
 
             geometry_msgs::msg::Point p_g;
