@@ -101,7 +101,7 @@ target_include_directories(euclidean_grid_composable PUBLIC
 target_link_libraries(euclidean_grid_composable ${PCL_LIBRARIES})
 ament_target_dependencies(euclidean_grid_composable ${ament_dependencies})
 rclcpp_components_register_nodes(euclidean_grid_composable
-PLUGIN "EuclideanGrid"
+PLUGIN "cluster::EuclideanGridCore"
 EXECUTABLE euclidean_grid_composable)
 
 
