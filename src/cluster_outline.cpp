@@ -59,7 +59,7 @@ void ClusterOutline::addPointsIfNecessary(pcl::PointCloud<pcl::PointXYZ>::Ptr& h
 
 
 void ClusterOutline::computeOutline(pcl::PointCloud<pcl::PointXYZI>::Ptr& pointcloud, 
-                    visualization_msgs::msg::MarkerArray& hull_markers, int max_added_points, int max_clust_reached, std::string frame_id) {
+                    visualization_msgs::msg::MarkerArray& hull_markers, int max_added_points, int max_clust_reached, std::string frame_id, float marker_height) {
 
 
     // Map to store clusters, with the intensity as the key and the points as the value
@@ -103,30 +103,90 @@ void ClusterOutline::computeOutline(pcl::PointCloud<pcl::PointXYZI>::Ptr& pointc
         hull_marker.id = cluster_id++;
         hull_marker.type = visualization_msgs::msg::Marker::LINE_STRIP;
         hull_marker.action = visualization_msgs::msg::Marker::ADD;
-        hull_marker.scale.x = 0.2;
+        hull_marker.scale.x = 0.05;
         hull_marker.color.a = 1.0;
         hull_marker.color.r = 0.30; // 0.30 0.69 0.31 md_green_500 https://github.com/jkk-research/colors
         hull_marker.color.g = 0.69;
         hull_marker.color.b = 0.31;
+
+        // ground touching hull
+        visualization_msgs::msg::Marker hull_marker_g;
+        hull_marker_g.header.frame_id = frame_id;
+        hull_marker_g.header.stamp = rclcpp::Clock().now();
+        hull_marker_g.ns = "hull_g";
+        hull_marker_g.id = cluster_id++;
+        hull_marker_g.type = visualization_msgs::msg::Marker::LINE_STRIP;
+        hull_marker_g.action = visualization_msgs::msg::Marker::ADD;
+        hull_marker_g.scale.x = 0.05;
+        hull_marker_g.color.a = 1.0;
+        hull_marker_g.color.r = 0.30; // 0.30 0.69 0.31 md_green_500 https://github.com/jkk-research/colors
+        hull_marker_g.color.g = 0.69;
+        hull_marker_g.color.b = 0.31;
 
         // Add the points of the Convex Hull to the marker
         for (const auto& point : cloud_hull->points) {
             geometry_msgs::msg::Point p;
             p.x = point.x;
             p.y = point.y;
-            p.z = -1; // a z value of -1 is around the bumper height
+            p.z = marker_height; // a z value of -1 is around the bumper height
             hull_marker.points.push_back(p);
+            p.z = -2; // a z value of -2 is around the ground height
+            hull_marker_g.points.push_back(p);
         }
+
+        // Create a marker for connecting lines
+        visualization_msgs::msg::Marker connector_marker;
+        connector_marker.header.frame_id = frame_id;
+        connector_marker.header.stamp = rclcpp::Clock().now();
+        connector_marker.ns = "connector";
+        connector_marker.id = cluster_id++;
+        connector_marker.type = visualization_msgs::msg::Marker::LINE_LIST;
+        connector_marker.action = visualization_msgs::msg::Marker::ADD;
+        connector_marker.scale.x = 0.05;
+        connector_marker.color.a = 1.0;
+        connector_marker.color.r = 0.30;
+        connector_marker.color.g = 0.69;
+        connector_marker.color.b = 0.31;
+
+        // Add connecting lines between hull_marker and hull_marker_g
+        for (size_t i = 0; i < cloud_hull->points.size(); ++i) {
+            geometry_msgs::msg::Point p1;
+            p1.x = cloud_hull->points[i].x;
+            p1.y = cloud_hull->points[i].y;
+            p1.z = marker_height;
+
+            geometry_msgs::msg::Point p2;
+            p2.x = cloud_hull->points[i].x;
+            p2.y = cloud_hull->points[i].y;
+            p2.z = -2;
+
+            connector_marker.points.push_back(p1);
+            connector_marker.points.push_back(p2);
+        }
+
         // Close the loop by adding the first point to the end
         if (!cloud_hull->points.empty()) {
             geometry_msgs::msg::Point p;
             p.x = cloud_hull->points[0].x;
             p.y = cloud_hull->points[0].y;
-            p.z = -1;
+            p.z = marker_height;
             hull_marker.points.push_back(p);
+
+            geometry_msgs::msg::Point p_g;
+            p_g.x = cloud_hull->points[0].x;
+            p_g.y = cloud_hull->points[0].y;
+            p_g.z = -2;
+            hull_marker_g.points.push_back(p_g);
+
+            // Add the closing connecting line
+            connector_marker.points.push_back(p);
+            connector_marker.points.push_back(p_g);
         }
-        // Add the marker to the array
+
+        // Add the markers to the array
         hull_markers.markers.push_back(hull_marker);
+        hull_markers.markers.push_back(hull_marker_g);
+        hull_markers.markers.push_back(connector_marker);
         // **Add a TEXT_VIEW_FACING marker for distance**
 
         // Find the center of the cluster (mean of all points)
