@@ -209,26 +209,18 @@ public:
 
     double angle_diff(double a, double b)
     {
-        while (a < 0.0)
+        // Calculate the difference and normalize to [-π, π]
+        double diff = a - b;
+        while (diff < -M_PI)
         {
-            a += M_PI * 2;
+            diff += M_PI * 2;
         }
-        while (a > M_PI * 2)
+        while (diff > M_PI)
         {
-            a -= M_PI * 2;
+            diff -= M_PI * 2;
         }
-        while (b < 0.0)
-        {
-            b += M_PI * 2;
-        }
-        while (b > M_PI * 2)
-        {
-            b -= M_PI * 2;
-        }
-        double greater = (a > b) ? a : b;
-        double smaller = (a > b) ? b : a;
-        double res = greater - smaller;
-        return res;
+        // Return absolute value (shortest angular distance)
+        return std::abs(diff);
     }
     double calculate_angle(Point point1, Point point2)
     {
@@ -282,21 +274,19 @@ public:
         Point p(tail_x, tail_y);
         for (Point &q : candidate_points)
         {
-            if (q.cluster_id == -1) // removed temporary  q.core == true  TODO:
+            // Allow reuse of points across clusters by ignoring cluster_id here
+            if (eps_min <= distance(p, q) && distance(p, q) <= eps_max)
             {
-                if (eps_min <= distance(p, q) && distance(p, q) <= eps_max)
+                double candidate_angle = calculate_angle(p, q);
+                double angle_difference = angle_diff(candidate_angle, tail_angle[id]);
+                if (angle_difference < ang_threshold)
                 {
-                    double candidate_angle = calculate_angle(p, q);
-                    double angle_difference = angle_diff(candidate_angle, tail_angle[id]);
-                    if (angle_difference < ang_threshold)
-                    {
-                        add_back(q, id);
-                        recalculate_head_tail_angles();
-                        extending = true;
-                        break;
-                    }
+                    add_back(q, id);
                     recalculate_head_tail_angles();
+                    extending = true;
+                    break;
                 }
+                recalculate_head_tail_angles();
             }
         }
         return extending;
