@@ -23,14 +23,14 @@ def generate_launch_description():
                 {'minY': -20.0},
                 {'maxX': 0.0},
                 {'maxY': 20.0},
-                {'maxZ': 0.1},
-                {'minZ': -0.1},
+                {'maxZ': 0.2},
+                {'minZ': 0.0},
                 {'verbose1': False},
                 {'search_start_width_x': 20.0},
                 {'search_start_width_y': 6.5},
                 {'eps_min': 0.2},
-                {'eps_max': 5.5},
-                {'ang_threshold_deg': 45.0},
+                {'eps_max': 5.0},
+                {'ang_threshold_deg': 50.0},
                 {'origin_filter_radius': 0.25},
             ]
         )

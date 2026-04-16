@@ -17,6 +17,12 @@
 #include "visualization_msgs/msg/marker_array.hpp"
 #include "rcl_interfaces/msg/set_parameters_result.hpp"
 #include "std_msgs/msg/float32.hpp"
+#include "tf2/LinearMath/Transform.h"
+#include "tf2/LinearMath/Quaternion.h"
+#include "tf2/LinearMath/Matrix3x3.h"
+#include "tf2_geometry_msgs/tf2_geometry_msgs.hpp"
+#include "tf2_ros/buffer.h"
+#include "tf2_ros/transform_listener.h"
 // PCL
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
@@ -100,6 +106,10 @@ class DblaneFormula : public rclcpp::Node
       {
         origin_filter_radius = param.as_double();
       }
+      if (param.get_name() == "global_point_merge_radius")
+      {
+        global_point_merge_radius_ = param.as_double();
+      }
       if (param.get_name() == "points_in_topic")
       {
         points_in_topic = param.as_string();
@@ -114,6 +124,29 @@ class DblaneFormula : public rclcpp::Node
       {
         marker_out_topic = param.as_string();
         pub_marker_ = this->create_publisher<visualization_msgs::msg::MarkerArray>(marker_out_topic, 10);
+      }
+      if (param.get_name() == "marker_odom_out_topic")
+      {
+        marker_odom_out_topic_ = param.as_string();
+        pub_marker_odom_ = this->create_publisher<visualization_msgs::msg::MarkerArray>(marker_odom_out_topic_, 10);
+      }
+      if (param.get_name() == "interp_points_out_topic")
+      {
+        interp_points_out_topic_ = param.as_string();
+        pub_interp_points_ = this->create_publisher<sensor_msgs::msg::PointCloud2>(interp_points_out_topic_, 10);
+      }
+      if (param.get_name() == "interp_marker_map_out_topic")
+      {
+        interp_marker_map_out_topic_ = param.as_string();
+        pub_interp_marker_map_ = this->create_publisher<visualization_msgs::msg::MarkerArray>(interp_marker_map_out_topic_, 10);
+      }
+      if (param.get_name() == "interp_point_merge_radius")
+      {
+        interp_point_merge_radius_ = param.as_double();
+      }
+      if (param.get_name() == "odom_frame")
+      {
+        odom_frame_ = param.as_string();
       }
     }
     return result;
@@ -131,6 +164,8 @@ public:
     this->declare_parameter<std::string>("points_in_topic", "/lexus3/os_center/points");
     this->declare_parameter<std::string>("points_out_topic", "clustered_points");
     this->declare_parameter<std::string>("marker_out_topic", "clustered_marker");
+    this->declare_parameter<std::string>("marker_odom_out_topic", "clustered_marker_odom");
+    this->declare_parameter<std::string>("odom_frame", "odom");
     this->declare_parameter<bool>("verbose1", verbose1);
     this->declare_parameter<bool>("verbose2", verbose2);
     this->declare_parameter<float>("search_start_width_x", search_start_width_x);
@@ -140,6 +175,10 @@ public:
     this->declare_parameter<float>("eps_max", eps_max);
     this->declare_parameter<float>("ang_threshold_deg", ang_threshold_deg);
     this->declare_parameter<float>("origin_filter_radius", origin_filter_radius);
+    this->declare_parameter<float>("global_point_merge_radius", global_point_merge_radius_);
+    this->declare_parameter<std::string>("interp_points_out_topic", interp_points_out_topic_);
+    this->declare_parameter<std::string>("interp_marker_map_out_topic", interp_marker_map_out_topic_);
+    this->declare_parameter<float>("interp_point_merge_radius", interp_point_merge_radius_);
     this->get_parameter("minX", minX);
     this->get_parameter("minY", minY);
     this->get_parameter("minZ", minZ);
@@ -149,6 +188,8 @@ public:
     this->get_parameter("points_in_topic", points_in_topic);
     this->get_parameter("points_out_topic", points_out_topic);
     this->get_parameter("marker_out_topic", marker_out_topic);
+    this->get_parameter("marker_odom_out_topic", marker_odom_out_topic_);
+    this->get_parameter("odom_frame", odom_frame_);
     this->get_parameter("verbose1", verbose1);
     this->get_parameter("verbose2", verbose2);
     this->get_parameter("search_start_width_x", search_start_width_x);
@@ -158,9 +199,18 @@ public:
     this->get_parameter("eps_max", eps_max);
     this->get_parameter("ang_threshold_deg", ang_threshold_deg);
     this->get_parameter("origin_filter_radius", origin_filter_radius);
+    this->get_parameter("global_point_merge_radius", global_point_merge_radius_);
+    this->get_parameter("interp_points_out_topic", interp_points_out_topic_);
+    this->get_parameter("interp_marker_map_out_topic", interp_marker_map_out_topic_);
+    this->get_parameter("interp_point_merge_radius", interp_point_merge_radius_);
 
     pub_lidar_ = this->create_publisher<sensor_msgs::msg::PointCloud2>(points_out_topic, 10);
     pub_marker_ = this->create_publisher<visualization_msgs::msg::MarkerArray>(marker_out_topic, 10);
+    pub_marker_odom_ = this->create_publisher<visualization_msgs::msg::MarkerArray>(marker_odom_out_topic_, 10);
+    pub_interp_points_ = this->create_publisher<sensor_msgs::msg::PointCloud2>(interp_points_out_topic_, 10);
+    pub_interp_marker_map_ = this->create_publisher<visualization_msgs::msg::MarkerArray>(interp_marker_map_out_topic_, 10);
+  tf_buffer_ = std::make_unique<tf2_ros::Buffer>(this->get_clock());
+  tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
     
     sub_lidar_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(points_in_topic, 10, std::bind(&DblaneFormula::lidar_callback, this, std::placeholders::_1));
     callback_handle_ = this->add_on_set_parameters_callback(std::bind(&DblaneFormula::parametersCallback, this, std::placeholders::_1));
@@ -183,6 +233,58 @@ public:
   }
 
 private:
+  bool is_new_global_point(const Point &candidate) const
+  {
+    const double merge_radius_sq = global_point_merge_radius_ * global_point_merge_radius_;
+    for (const auto &existing : global_points_)
+    {
+      const double dx = existing.x - candidate.x;
+      const double dy = existing.y - candidate.y;
+      if ((dx * dx + dy * dy) <= merge_radius_sq)
+      {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  void ingest_global_points(
+    const pcl::PointCloud<pcl::PointXYZI>::Ptr &local_cloud,
+    const geometry_msgs::msg::TransformStamped &sensor_to_global)
+  {
+    tf2::Transform tf_transform;
+    tf2::fromMsg(sensor_to_global.transform, tf_transform);
+
+    for (const auto &local_point : local_cloud->points)
+    {
+      const tf2::Vector3 transformed = tf_transform * tf2::Vector3(local_point.x, local_point.y, local_point.z);
+      Point global_point(transformed.x(), transformed.y());
+      if (is_new_global_point(global_point))
+      {
+        global_points_.push_back(global_point);
+      }
+    }
+  }
+
+  pcl::PointCloud<pcl::PointXYZI>::Ptr global_points_as_cloud() const
+  {
+    pcl::PointCloud<pcl::PointXYZI>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZI>);
+    cloud->points.reserve(global_points_.size());
+    for (const auto &point : global_points_)
+    {
+      pcl::PointXYZI pcl_point;
+      pcl_point.x = point.x;
+      pcl_point.y = point.y;
+      pcl_point.z = 0.0f;
+      pcl_point.intensity = 0.0f;
+      cloud->points.push_back(pcl_point);
+    }
+    cloud->width = cloud->points.size();
+    cloud->height = 1;
+    cloud->is_dense = true;
+    return cloud;
+  }
+
   pcl::PointCloud<pcl::PointXYZI>::Ptr crop_pcl(pcl::PointCloud<pcl::PointXYZI>::Ptr &cloud_in, double min_x_, double min_y_, double max_x_, double max_y_)
   {
     pcl::CropBox<pcl::PointXYZI> crop_fwd;
@@ -296,6 +398,329 @@ private:
   double calculate_score(double angle_difference, double distance)
   {
     return angle_difference + 0.001 * distance;
+  }
+
+  struct NongroundScatterStats
+  {
+    size_t count = 0;
+    double mean_x = 0.0;
+    double mean_y = 0.0;
+    double std_x = 0.0;
+    double std_y = 0.0;
+    double radial_std = 0.0;
+  };
+
+  NongroundScatterStats compute_nonground_scatter_stats(
+    const pcl::PointCloud<pcl::PointXYZI>::Ptr &cloud) const
+  {
+    NongroundScatterStats stats;
+    if (!cloud || cloud->points.empty())
+    {
+      return stats;
+    }
+
+    stats.count = cloud->points.size();
+    for (const auto &p : cloud->points)
+    {
+      stats.mean_x += p.x;
+      stats.mean_y += p.y;
+    }
+    stats.mean_x /= static_cast<double>(stats.count);
+    stats.mean_y /= static_cast<double>(stats.count);
+
+    double var_x = 0.0;
+    double var_y = 0.0;
+    double radial_var = 0.0;
+    for (const auto &p : cloud->points)
+    {
+      const double dx = p.x - stats.mean_x;
+      const double dy = p.y - stats.mean_y;
+      var_x += dx * dx;
+      var_y += dy * dy;
+      radial_var += dx * dx + dy * dy;
+    }
+
+    const double inv_n = 1.0 / static_cast<double>(stats.count);
+    stats.std_x = std::sqrt(var_x * inv_n);
+    stats.std_y = std::sqrt(var_y * inv_n);
+    stats.radial_std = std::sqrt(radial_var * inv_n);
+    return stats;
+  }
+
+  bool points_near(
+    const geometry_msgs::msg::Point &a,
+    const geometry_msgs::msg::Point &b,
+    double tolerance) const
+  {
+    const double dx = a.x - b.x;
+    const double dy = a.y - b.y;
+    const double dz = a.z - b.z;
+    return (dx * dx + dy * dy + dz * dz) <= (tolerance * tolerance);
+  }
+
+  bool marker_has_segment(
+    const visualization_msgs::msg::Marker &marker,
+    const geometry_msgs::msg::Point &p1,
+    const geometry_msgs::msg::Point &p2,
+    double tolerance) const
+  {
+    for (size_t i = 0; i + 1 < marker.points.size(); i += 2)
+    {
+      const auto &a = marker.points[i];
+      const auto &b = marker.points[i + 1];
+      const bool same_order = points_near(a, p1, tolerance) && points_near(b, p2, tolerance);
+      const bool swapped_order = points_near(a, p2, tolerance) && points_near(b, p1, tolerance);
+      if (same_order || swapped_order)
+      {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  void add_unique_segment(
+    visualization_msgs::msg::Marker &marker,
+    const geometry_msgs::msg::Point &p1,
+    const geometry_msgs::msg::Point &p2,
+    double tolerance)
+  {
+    if (!marker_has_segment(marker, p1, p2, tolerance))
+    {
+      marker.points.push_back(p1);
+      marker.points.push_back(p2);
+    }
+  }
+
+  geometry_msgs::msg::Point transform_point(
+    const geometry_msgs::msg::Point &point,
+    const geometry_msgs::msg::TransformStamped &transform) const
+  {
+    tf2::Transform tf_transform;
+    tf2::fromMsg(transform.transform, tf_transform);
+
+    const tf2::Vector3 transformed = tf_transform * tf2::Vector3(point.x, point.y, point.z);
+
+    geometry_msgs::msg::Point output;
+    output.x = transformed.x();
+    output.y = transformed.y();
+    output.z = transformed.z();
+    return output;
+  }
+
+  bool transform_marker_to_frame(
+    const visualization_msgs::msg::Marker &marker,
+    const std::string &target_frame,
+    visualization_msgs::msg::Marker &transformed_marker)
+  {
+    const std::string source_frame = marker.header.frame_id;
+    if (source_frame.empty())
+    {
+      return false;
+    }
+
+    transformed_marker = marker;
+    if (source_frame == target_frame)
+    {
+      transformed_marker.header.frame_id = target_frame;
+      return true;
+    }
+
+    try
+    {
+      const auto transform = tf_buffer_->lookupTransform(target_frame, source_frame, tf2::TimePointZero);
+      transformed_marker.header.frame_id = target_frame;
+      transformed_marker.header.stamp = transform.header.stamp;
+
+      if (marker.points.empty())
+      {
+        tf2::doTransform(marker.pose, transformed_marker.pose, transform);
+      }
+      else
+      {
+        transformed_marker.points.clear();
+        transformed_marker.points.reserve(marker.points.size());
+        for (const auto &point : marker.points)
+        {
+          transformed_marker.points.push_back(transform_point(point, transform));
+        }
+      }
+
+      return true;
+    }
+    catch (const tf2::TransformException &exception)
+    {
+      RCLCPP_WARN_THROTTLE(
+        this->get_logger(),
+        *this->get_clock(),
+        2000,
+        "Failed to transform marker from '%s' to '%s': %s",
+        source_frame.c_str(),
+        target_frame.c_str(),
+        exception.what());
+      return false;
+    }
+  }
+
+  void publish_odom_marker_array(const visualization_msgs::msg::MarkerArray &markers)
+  {
+    if (!pub_marker_odom_ || markers.markers.empty())
+    {
+      return;
+    }
+
+    visualization_msgs::msg::MarkerArray odom_markers;
+    odom_markers.markers.reserve(markers.markers.size());
+
+    for (const auto &marker : markers.markers)
+    {
+      visualization_msgs::msg::Marker transformed_marker;
+      if (transform_marker_to_frame(marker, odom_frame_, transformed_marker))
+      {
+        odom_markers.markers.push_back(transformed_marker);
+      }
+    }
+
+    if (!odom_markers.markers.empty())
+    {
+      pub_marker_odom_->publish(odom_markers);
+    }
+  }
+
+  void publish_marker_topics(const visualization_msgs::msg::MarkerArray &markers)
+  {
+    pub_marker_->publish(markers);
+    publish_odom_marker_array(markers);
+  }
+
+  void initialize_interp_map_markers_if_needed(const std::string &frame_id, const rclcpp::Time &stamp)
+  {
+    if (interp_map_markers_initialized_)
+    {
+      interp_left_map_marker_.header.frame_id = frame_id;
+      interp_left_map_marker_.header.stamp = stamp;
+      interp_right_map_marker_.header.frame_id = frame_id;
+      interp_right_map_marker_.header.stamp = stamp;
+      return;
+    }
+
+    interp_left_map_marker_.header.frame_id = frame_id;
+    interp_left_map_marker_.header.stamp = stamp;
+    interp_left_map_marker_.ns = "parallel_left_interpolated_map";
+    interp_left_map_marker_.type = visualization_msgs::msg::Marker::LINE_LIST;
+    interp_left_map_marker_.action = visualization_msgs::msg::Marker::ADD;
+    interp_left_map_marker_.scale.x = 0.6;
+    interp_left_map_marker_.color.r = 0.35;
+    interp_left_map_marker_.color.g = 0.35;
+    interp_left_map_marker_.color.b = 1.0;
+    interp_left_map_marker_.color.a = 0.95;
+    interp_left_map_marker_.id = 162;
+    interp_left_map_marker_.pose.orientation.w = 1.0;
+
+    interp_right_map_marker_.header.frame_id = frame_id;
+    interp_right_map_marker_.header.stamp = stamp;
+    interp_right_map_marker_.ns = "parallel_right_interpolated_map";
+    interp_right_map_marker_.type = visualization_msgs::msg::Marker::LINE_LIST;
+    interp_right_map_marker_.action = visualization_msgs::msg::Marker::ADD;
+    interp_right_map_marker_.scale.x = 0.6;
+    interp_right_map_marker_.color.r = 0.35;
+    interp_right_map_marker_.color.g = 0.95;
+    interp_right_map_marker_.color.b = 0.35;
+    interp_right_map_marker_.color.a = 0.95;
+    interp_right_map_marker_.id = 163;
+    interp_right_map_marker_.pose.orientation.w = 1.0;
+
+    interp_map_markers_initialized_ = true;
+  }
+
+  void publish_interpolated_marker_map(
+    const visualization_msgs::msg::Marker &left_interp_marker,
+    const visualization_msgs::msg::Marker &right_interp_marker,
+    const std::string &frame_id,
+    const rclcpp::Time &stamp)
+  {
+    if (!pub_interp_marker_map_)
+    {
+      return;
+    }
+
+    initialize_interp_map_markers_if_needed(frame_id, stamp);
+
+    const double interpolation_dedup_tolerance = 0.05;
+    for (size_t i = 0; i + 1 < left_interp_marker.points.size(); i += 2)
+    {
+      add_unique_segment(
+        interp_left_map_marker_,
+        left_interp_marker.points[i],
+        left_interp_marker.points[i + 1],
+        interpolation_dedup_tolerance);
+    }
+
+    for (size_t i = 0; i + 1 < right_interp_marker.points.size(); i += 2)
+    {
+      add_unique_segment(
+        interp_right_map_marker_,
+        right_interp_marker.points[i],
+        right_interp_marker.points[i + 1],
+        interpolation_dedup_tolerance);
+    }
+
+    visualization_msgs::msg::MarkerArray map_markers;
+    if (!interp_left_map_marker_.points.empty())
+    {
+      map_markers.markers.push_back(interp_left_map_marker_);
+    }
+    if (!interp_right_map_marker_.points.empty())
+    {
+      map_markers.markers.push_back(interp_right_map_marker_);
+    }
+
+    visualization_msgs::msg::Marker left_points_map_marker;
+    left_points_map_marker.header.frame_id = frame_id;
+    left_points_map_marker.header.stamp = stamp;
+    left_points_map_marker.ns = "parallel_left_interpolated_map_points";
+    left_points_map_marker.type = visualization_msgs::msg::Marker::SPHERE_LIST;
+    left_points_map_marker.action = visualization_msgs::msg::Marker::ADD;
+    left_points_map_marker.scale.x = 0.35;
+    left_points_map_marker.scale.y = 0.35;
+    left_points_map_marker.scale.z = 0.35;
+    left_points_map_marker.color.r = 0.20;
+    left_points_map_marker.color.g = 0.20;
+    left_points_map_marker.color.b = 1.00;
+    left_points_map_marker.color.a = 0.95;
+    left_points_map_marker.id = 164;
+    left_points_map_marker.pose.orientation.w = 1.0;
+    left_points_map_marker.points = interp_left_global_pts_;
+
+    visualization_msgs::msg::Marker right_points_map_marker;
+    right_points_map_marker.header.frame_id = frame_id;
+    right_points_map_marker.header.stamp = stamp;
+    right_points_map_marker.ns = "parallel_right_interpolated_map_points";
+    right_points_map_marker.type = visualization_msgs::msg::Marker::SPHERE_LIST;
+    right_points_map_marker.action = visualization_msgs::msg::Marker::ADD;
+    right_points_map_marker.scale.x = 0.35;
+    right_points_map_marker.scale.y = 0.35;
+    right_points_map_marker.scale.z = 0.35;
+    right_points_map_marker.color.r = 0.20;
+    right_points_map_marker.color.g = 1.00;
+    right_points_map_marker.color.b = 0.20;
+    right_points_map_marker.color.a = 0.95;
+    right_points_map_marker.id = 165;
+    right_points_map_marker.pose.orientation.w = 1.0;
+    right_points_map_marker.points = interp_right_global_pts_;
+
+    if (!left_points_map_marker.points.empty())
+    {
+      map_markers.markers.push_back(left_points_map_marker);
+    }
+    if (!right_points_map_marker.points.empty())
+    {
+      map_markers.markers.push_back(right_points_map_marker);
+    }
+
+    if (!map_markers.markers.empty())
+    {
+      pub_interp_marker_map_->publish(map_markers);
+    }
   }
 
   void marker_callback(const visualization_msgs::msg::MarkerArray::ConstSharedPtr input_msg)
@@ -690,7 +1115,7 @@ private:
     }
 
     latest_markers_ = mark_array;
-    pub_marker_->publish(mark_array);
+    publish_marker_topics(mark_array);
   }
   
   
@@ -702,35 +1127,145 @@ private:
     // Collect special segments to highlight (e.g., after trimming crossings)
     std::vector<std::pair<Point, Point>> red_segments_left;
     std::vector<std::pair<Point, Point>> red_segments_right;
-    // Convert to PCL data type
-    pcl::PointCloud<pcl::PointXYZI>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZI>);
-    pcl::fromROSMsg(*input_msg, *cloud);
-    int original_size = cloud->width * cloud->height;
+    // Convert incoming local frame points, then append only new points into global map.
+    pcl::PointCloud<pcl::PointXYZI>::Ptr local_cloud(new pcl::PointCloud<pcl::PointXYZI>);
+    pcl::fromROSMsg(*input_msg, *local_cloud);
 
-    // Filter out points outside of the box
-    pcl::CropBox<pcl::PointXYZI> crop;
-    crop.setInputCloud(cloud);
-    crop.setMin(Eigen::Vector4f(minX, minY, minZ, 1.0));
-    crop.setMax(Eigen::Vector4f(maxX, maxY, maxZ, 1.0));
-    crop.filter(*cloud);
-    int after_box_filter = cloud->width * cloud->height;
-
-    // Filter out points around origin (within 0.5m diameter circle)
-    pcl::PointCloud<pcl::PointXYZI>::Ptr cloud_filtered(new pcl::PointCloud<pcl::PointXYZI>);
-    //const double origin_filter_radius = 0.25; // 0.5m diameter = 0.25m radius
-    for (const auto& point : cloud->points)
+    geometry_msgs::msg::TransformStamped sensor_to_global;
+    try
     {
-      double distance_from_origin = std::sqrt(point.x * point.x + point.y * point.y);
-      if (distance_from_origin > origin_filter_radius)
+      sensor_to_global = tf_buffer_->lookupTransform(odom_frame_, input_msg->header.frame_id, tf2::TimePointZero);
+    }
+    catch (const tf2::TransformException &exception)
+    {
+      RCLCPP_WARN_THROTTLE(
+        this->get_logger(),
+        *this->get_clock(),
+        2000,
+        "Skipping lidar frame: failed transform '%s' -> '%s': %s",
+        input_msg->header.frame_id.c_str(),
+        odom_frame_.c_str(),
+        exception.what());
+      return;
+    }
+
+    tf2::Transform sensor_to_global_tf;
+    tf2::fromMsg(sensor_to_global.transform, sensor_to_global_tf);
+
+    pcl::PointCloud<pcl::PointXYZI>::Ptr global_cloud(new pcl::PointCloud<pcl::PointXYZI>);
+    global_cloud->points.reserve(local_cloud->points.size());
+    for (const auto &local_point : local_cloud->points)
+    {
+      const tf2::Vector3 transformed =
+        sensor_to_global_tf * tf2::Vector3(local_point.x, local_point.y, local_point.z);
+      pcl::PointXYZI global_point;
+      global_point.x = transformed.x();
+      global_point.y = transformed.y();
+      global_point.z = transformed.z();
+      global_point.intensity = local_point.intensity;
+      global_cloud->points.push_back(global_point);
+    }
+    global_cloud->width = global_cloud->points.size();
+    global_cloud->height = 1;
+    global_cloud->is_dense = true;
+
+    if (global_cloud->points.empty())
+    {
+      return;
+    }
+
+    const double vehicle_x = sensor_to_global.transform.translation.x;
+    const double vehicle_y = sensor_to_global.transform.translation.y;
+    tf2::Quaternion vehicle_orientation;
+    tf2::fromMsg(sensor_to_global.transform.rotation, vehicle_orientation);
+    double roll = 0.0, pitch = 0.0, yaw = 0.0;
+    tf2::Matrix3x3(vehicle_orientation).getRPY(roll, pitch, yaw);
+
+    // Seed first search direction from current vehicle heading.
+    init_heading_left_ = yaw;
+    init_heading_right_ = yaw;
+
+    auto to_global_xy = [&](double forward, double lateral, double &x_out, double &y_out)
+    {
+      const double cy = std::cos(yaw);
+      const double sy = std::sin(yaw);
+      x_out = vehicle_x + forward * cy - lateral * sy;
+      y_out = vehicle_y + forward * sy + lateral * cy;
+    };
+
+    auto point_in_oriented_box = [&](const pcl::PointXYZI &point,
+                                     double cx,
+                                     double cy,
+                                     double box_yaw,
+                                     double half_x,
+                                     double half_y)
+    {
+      const double dx = point.x - cx;
+      const double dy = point.y - cy;
+      const double cyaw = std::cos(box_yaw);
+      const double syaw = std::sin(box_yaw);
+      const double local_x = dx * cyaw + dy * syaw;
+      const double local_y = -dx * syaw + dy * cyaw;
+      return std::abs(local_x) <= half_x && std::abs(local_y) <= half_y;
+    };
+
+    const int original_size = global_cloud->width * global_cloud->height;
+
+    const double box_center_forward = 0.5 * (minX + maxX);
+    const double box_center_lateral = 0.5 * (minY + maxY);
+    const double box_half_forward = 0.5 * (maxX - minX);
+    const double box_half_lateral = 0.5 * (maxY - minY);
+    double box_center_global_x = 0.0;
+    double box_center_global_y = 0.0;
+    to_global_xy(box_center_forward, box_center_lateral, box_center_global_x, box_center_global_y);
+
+    pcl::PointCloud<pcl::PointXYZI>::Ptr cloud_box_filtered(new pcl::PointCloud<pcl::PointXYZI>);
+    for (const auto &point : global_cloud->points)
+    {
+      if (!point_in_oriented_box(point, box_center_global_x, box_center_global_y, yaw, box_half_forward, box_half_lateral))
       {
-        cloud_filtered->points.push_back(point);
+        continue;
+      }
+      if (point.z < minZ || point.z > maxZ)
+      {
+        continue;
+      }
+      cloud_box_filtered->points.push_back(point);
+    }
+    cloud_box_filtered->width = cloud_box_filtered->points.size();
+    cloud_box_filtered->height = 1;
+    cloud_box_filtered->is_dense = true;
+    const int after_box_filter = cloud_box_filtered->width * cloud_box_filtered->height;
+
+    pcl::PointCloud<pcl::PointXYZI>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZI>);
+    for (const auto &point : cloud_box_filtered->points)
+    {
+      const double dx = point.x - vehicle_x;
+      const double dy = point.y - vehicle_y;
+      const double distance_from_vehicle = std::sqrt(dx * dx + dy * dy);
+      if (distance_from_vehicle > origin_filter_radius)
+      {
+        cloud->points.push_back(point);
       }
     }
-    cloud_filtered->width = cloud_filtered->points.size();
-    cloud_filtered->height = 1;
-    cloud_filtered->is_dense = true;
-    cloud = cloud_filtered; // Replace cloud with filtered version
-    int after_origin_filter = cloud->width * cloud->height;
+    cloud->width = cloud->points.size();
+    cloud->height = 1;
+    cloud->is_dense = true;
+    const int after_origin_filter = cloud->width * cloud->height;
+
+    const NongroundScatterStats nonground_scatter = compute_nonground_scatter_stats(cloud);
+    RCLCPP_INFO_THROTTLE(
+      this->get_logger(),
+      *this->get_clock(),
+      1000,
+      "nonground scatter (frame=%s n=%zu): mean=(%.3f, %.3f) std=(%.3f, %.3f) radial_std=%.3f m",
+      odom_frame_.c_str(),
+      nonground_scatter.count,
+      nonground_scatter.mean_x,
+      nonground_scatter.mean_y,
+      nonground_scatter.std_x,
+      nonground_scatter.std_y,
+      nonground_scatter.radial_std);
 
     if (verbose1)
     {
@@ -749,8 +1284,18 @@ private:
 
     // create marker array
     visualization_msgs::msg::MarkerArray mark_array;
+    const std::string marker_frame = odom_frame_;
+
+    double blue_left_global_x = 0.0;
+    double blue_left_global_y = 0.0;
+    to_global_xy(-4.0, -2.25, blue_left_global_x, blue_left_global_y);
+
+    double amber_right_global_x = 0.0;
+    double amber_right_global_y = 0.0;
+    to_global_xy(-4.0, 2.25, amber_right_global_x, amber_right_global_y);
+
     visualization_msgs::msg::Marker blue_left;
-    blue_left.header.frame_id = input_msg->header.frame_id;
+    blue_left.header.frame_id = marker_frame;
     blue_left.header.stamp = this->now();
     blue_left.ns = "search_start";
     blue_left.type = visualization_msgs::msg::Marker::CUBE;
@@ -766,12 +1311,17 @@ private:
     blue_left.color.b = md_blue_500_b;
     blue_left.color.a = 0.8;
     blue_left.id = 0;
-    blue_left.pose.position.x = -4.0;
-    blue_left.pose.position.y = -2.25;
+    blue_left.pose.position.x = blue_left_global_x;
+    blue_left.pose.position.y = blue_left_global_y;
     blue_left.pose.position.z = 0.0;
+    {
+      tf2::Quaternion q;
+      q.setRPY(0.0, 0.0, yaw);
+      blue_left.pose.orientation = tf2::toMsg(q);
+    }
 
     visualization_msgs::msg::Marker amber_right;
-    amber_right.header.frame_id = input_msg->header.frame_id;
+    amber_right.header.frame_id = marker_frame;
     amber_right.header.stamp = this->now();
     amber_right.ns = "search_start";
     amber_right.type = visualization_msgs::msg::Marker::CUBE;
@@ -786,9 +1336,14 @@ private:
     amber_right.color.b = md_amber_500_b;
     amber_right.color.a = 0.8;
     amber_right.id = 1;
-    amber_right.pose.position.x = -4.0;
-    amber_right.pose.position.y = 2.25;
+    amber_right.pose.position.x = amber_right_global_x;
+    amber_right.pose.position.y = amber_right_global_y;
     amber_right.pose.position.z = 0.0;
+    {
+      tf2::Quaternion q;
+      q.setRPY(0.0, 0.0, yaw);
+      amber_right.pose.orientation = tf2::toMsg(q);
+    }
 
     // pcl::PointCloud<pcl::PointXYZI>::Ptr cloud_start(new pcl::PointCloud<pcl::PointXYZI>);
     // cloud_start = crop_pcl(cloud, -0.5 * search_start_width_x, -1.0 * search_start_width_y, +0.5 * search_start_width_x, +1.0 * search_start_width_y);
@@ -804,9 +1359,41 @@ private:
     }
     cluster1.candidate_points = candidate_points;
 
-    // LIDAR looks backward, so the left side is positive y and the right side is negative y TODO: parameterize
+    // Build directional windows directly in global frame using oriented boxes.
     pcl::PointCloud<pcl::PointXYZI>::Ptr cloud_fwd(new pcl::PointCloud<pcl::PointXYZI>);
-    cloud_fwd = crop_pcl(cloud, -8.0, -1.5, -0.1, +1.5); // cloud, min_x, min_y, max_x, max_y
+    pcl::PointCloud<pcl::PointXYZI>::Ptr cloud_left(new pcl::PointCloud<pcl::PointXYZI>);
+    pcl::PointCloud<pcl::PointXYZI>::Ptr cloud_right(new pcl::PointCloud<pcl::PointXYZI>);
+
+    double fwd_center_x = 0.0;
+    double fwd_center_y = 0.0;
+    to_global_xy(-4.05, 0.0, fwd_center_x, fwd_center_y);
+
+    for (const auto &p : cloud->points)
+    {
+      if (point_in_oriented_box(p, fwd_center_x, fwd_center_y, yaw, 3.95, 1.5))
+      {
+        cloud_fwd->points.push_back(p);
+      }
+      if (point_in_oriented_box(p, blue_left_global_x, blue_left_global_y, yaw, 4.0, 2.25))
+      {
+        cloud_left->points.push_back(p);
+      }
+      if (point_in_oriented_box(p, amber_right_global_x, amber_right_global_y, yaw, 4.0, 2.25))
+      {
+        cloud_right->points.push_back(p);
+      }
+    }
+
+    cloud_fwd->width = cloud_fwd->points.size();
+    cloud_fwd->height = 1;
+    cloud_fwd->is_dense = true;
+    cloud_left->width = cloud_left->points.size();
+    cloud_left->height = 1;
+    cloud_left->is_dense = true;
+    cloud_right->width = cloud_right->points.size();
+    cloud_right->height = 1;
+    cloud_right->is_dense = true;
+
     RCLCPP_INFO_STREAM(this->get_logger(), "crop_fwd: " << cloud_fwd->width * cloud_fwd->height);
 
     // get the smallest x value from cloud_fwd
@@ -818,12 +1405,6 @@ private:
         min_x = p.x;
       }
     }
-    pcl::PointCloud<pcl::PointXYZI>::Ptr cloud_left(new pcl::PointCloud<pcl::PointXYZI>);
-    cloud_left = crop_pcl(cloud, -8.0, -4.5, -0.001, -0.01); // cloud, min_x, min_y, max_x, max_y
-    //RCLCPP_INFO_STREAM(this->get_logger(), "crop_left: " << cloud_left->width * cloud_left->height);
-    pcl::PointCloud<pcl::PointXYZI>::Ptr cloud_right(new pcl::PointCloud<pcl::PointXYZI>);
-    cloud_right = crop_pcl(cloud, -8.0, 0.01, -0.001, 4.5);
-
     // get the largest y value from cloud_left
     Point left_start(-50.0, -10.0);
    
@@ -845,7 +1426,9 @@ private:
     double min_dist_left = std::numeric_limits<double>::infinity();
     for (pcl::PointXYZI p : cloud_left->points)
     {
-      double dist = std::sqrt(p.x * p.x + p.y * p.y);
+      const double dx = p.x - vehicle_x;
+      const double dy = p.y - vehicle_y;
+      const double dist = std::sqrt(dx * dx + dy * dy);
       if (dist < min_dist_left)
       {
         min_dist_left = dist;
@@ -864,7 +1447,9 @@ private:
     double min_dist_right = std::numeric_limits<double>::infinity();
     for (pcl::PointXYZI p : cloud_right->points)
     {
-      double dist = std::sqrt(p.x * p.x + p.y * p.y);
+      const double dx = p.x - vehicle_x;
+      const double dy = p.y - vehicle_y;
+      const double dist = std::sqrt(dx * dx + dy * dy);
       if (dist < min_dist_right)
       {
         min_dist_right = dist;
@@ -891,7 +1476,7 @@ private:
         if (eps_min <= dist && dist <= eps_max)
         {
           double candidate_ang = cluster1.calculate_angle(p, left_start);
-          double angle_difference = std::abs(cluster1.angle_diff(candidate_ang, 0.0));
+          double angle_difference = std::abs(cluster1.angle_diff(candidate_ang, init_heading_left_));
           
           if (angle_difference < ang_threshold)
           {
@@ -925,7 +1510,7 @@ private:
         if (eps_min <= dist && dist <= eps_max)
         {
           double candidate_ang = cluster1.calculate_angle(p, right_start);
-          double angle_difference = std::abs(cluster1.angle_diff(candidate_ang, 0.0));
+          double angle_difference = std::abs(cluster1.angle_diff(candidate_ang, init_heading_right_));
           
           if (angle_difference < ang_threshold)
           {
@@ -1512,11 +2097,11 @@ private:
 
     visualization_msgs::msg::Marker left_start_marker, right_start_marker;
     init_debug_marker(left_start_marker, left_start.x, left_start.y, 1);
-    left_start_marker.header.frame_id = input_msg->header.frame_id;
+    left_start_marker.header.frame_id = marker_frame;
     left_start_marker.header.stamp = this->now();
     left_start_marker.ns = "start_left_point";
     init_debug_marker(right_start_marker, right_start.x, right_start.y, 2);
-    right_start_marker.header.frame_id = input_msg->header.frame_id;
+    right_start_marker.header.frame_id = marker_frame;
     right_start_marker.header.stamp = this->now();
     right_start_marker.ns = "start_right_point";
     // init_text_debug_marker(debug_text_marker);
@@ -1525,7 +2110,7 @@ private:
     // debug_text_marker.text = std::to_string(tmp_angle_difference);
 
     visualization_msgs::msg::Marker cluster1_marker;
-    cluster1_marker.header.frame_id = input_msg->header.frame_id;
+    cluster1_marker.header.frame_id = marker_frame;
     cluster1_marker.header.stamp = this->now();
     cluster1_marker.ns = "cluster1";
     cluster1_marker.type = visualization_msgs::msg::Marker::LINE_LIST;
@@ -1554,7 +2139,7 @@ private:
     }
 
     visualization_msgs::msg::Marker cluster2_marker;
-    cluster2_marker.header.frame_id = input_msg->header.frame_id;
+    cluster2_marker.header.frame_id = marker_frame;
     cluster2_marker.header.stamp = this->now();
     cluster2_marker.ns = "cluster2";
     cluster2_marker.type = visualization_msgs::msg::Marker::LINE_LIST;
@@ -1590,7 +2175,7 @@ private:
     // Add red segments for trimmed areas (crossing resolution)
     if (!red_segments_left.empty()) {
       visualization_msgs::msg::Marker red_left;
-      red_left.header.frame_id = input_msg->header.frame_id;
+      red_left.header.frame_id = marker_frame;
       red_left.header.stamp = this->now();
       red_left.ns = "trimmed_left";
       red_left.type = visualization_msgs::msg::Marker::LINE_LIST;
@@ -1612,7 +2197,7 @@ private:
     }
     if (!red_segments_right.empty()) {
       visualization_msgs::msg::Marker red_right;
-      red_right.header.frame_id = input_msg->header.frame_id;
+      red_right.header.frame_id = marker_frame;
       red_right.header.stamp = this->now();
       red_right.ns = "trimmed_right";
       red_right.type = visualization_msgs::msg::Marker::LINE_LIST;
@@ -1676,7 +2261,7 @@ private:
     
     // Párhuzamos szegmensek markerek
     visualization_msgs::msg::Marker parallel_left_marker;
-    parallel_left_marker.header.frame_id = input_msg->header.frame_id;
+    parallel_left_marker.header.frame_id = marker_frame;
     parallel_left_marker.header.stamp = this->now();
     parallel_left_marker.ns = "parallel_left";
     parallel_left_marker.type = visualization_msgs::msg::Marker::LINE_LIST;
@@ -1693,7 +2278,7 @@ private:
     parallel_left_marker.points.clear();
     
     visualization_msgs::msg::Marker parallel_right_marker;
-    parallel_right_marker.header.frame_id = input_msg->header.frame_id;
+    parallel_right_marker.header.frame_id = marker_frame;
     parallel_right_marker.header.stamp = this->now();
     parallel_right_marker.ns = "parallel_right";
     parallel_right_marker.type = visualization_msgs::msg::Marker::LINE_LIST;
@@ -1737,7 +2322,7 @@ private:
     
     // Create interpolated segment markers
     visualization_msgs::msg::Marker parallel_left_interpolated_marker;
-    parallel_left_interpolated_marker.header.frame_id = input_msg->header.frame_id;
+    parallel_left_interpolated_marker.header.frame_id = marker_frame;
     parallel_left_interpolated_marker.header.stamp = this->now();
     parallel_left_interpolated_marker.ns = "parallel_left_interpolated";
     parallel_left_interpolated_marker.type = visualization_msgs::msg::Marker::LINE_LIST;
@@ -1754,7 +2339,7 @@ private:
     parallel_left_interpolated_marker.points.clear();
 
     visualization_msgs::msg::Marker parallel_right_interpolated_marker;
-    parallel_right_interpolated_marker.header.frame_id = input_msg->header.frame_id;
+    parallel_right_interpolated_marker.header.frame_id = marker_frame;
     parallel_right_interpolated_marker.header.stamp = this->now();
     parallel_right_interpolated_marker.ns = "parallel_right_interpolated";
     parallel_right_interpolated_marker.type = visualization_msgs::msg::Marker::LINE_LIST;
@@ -1770,14 +2355,22 @@ private:
     parallel_right_interpolated_marker.pose.position.z = 0.0;
     parallel_right_interpolated_marker.points.clear();
     
+    const double interpolation_dedup_tolerance = 0.05;
+
     // Add matched segments to interpolated markers
     for (size_t idx : matched_left_indices) {
-      parallel_left_interpolated_marker.points.push_back(left_segments[idx].p1);
-      parallel_left_interpolated_marker.points.push_back(left_segments[idx].p2);
+      add_unique_segment(
+        parallel_left_interpolated_marker,
+        left_segments[idx].p1,
+        left_segments[idx].p2,
+        interpolation_dedup_tolerance);
     }
     for (size_t idx : matched_right_indices) {
-      parallel_right_interpolated_marker.points.push_back(right_segments[idx].p1);
-      parallel_right_interpolated_marker.points.push_back(right_segments[idx].p2);
+      add_unique_segment(
+        parallel_right_interpolated_marker,
+        right_segments[idx].p1,
+        right_segments[idx].p2,
+        interpolation_dedup_tolerance);
     }
     
     // Interpolate gaps in left cluster matched segments
@@ -1792,8 +2385,11 @@ private:
         bool is_matched = std::find(matched_left_indices.begin(), matched_left_indices.end(), i) != matched_left_indices.end();
         if (is_matched && i >= 0 && i < (int)left_segments.size()) {
           // Add matched segment
-          parallel_left_interpolated_marker.points.push_back(left_segments[i].p1);
-          parallel_left_interpolated_marker.points.push_back(left_segments[i].p2);
+          add_unique_segment(
+            parallel_left_interpolated_marker,
+            left_segments[i].p1,
+            left_segments[i].p2,
+            interpolation_dedup_tolerance);
         } else if (!is_matched && i >= 0 && i < (int)left_segments.size()) {
           // Find adjacent matched segments for interpolation
           int before_idx = -1, after_idx = -1;
@@ -1813,8 +2409,11 @@ private:
             p2.y = left_segments[before_idx].p2.y + (left_segments[after_idx].p1.y - left_segments[before_idx].p2.y) * (i + 1 - before_idx) / (after_idx - before_idx);
             p2.z = 0.0;
             
-            parallel_left_interpolated_marker.points.push_back(p1);
-            parallel_left_interpolated_marker.points.push_back(p2);
+            add_unique_segment(
+              parallel_left_interpolated_marker,
+              p1,
+              p2,
+              interpolation_dedup_tolerance);
           }
         }
       }
@@ -1832,8 +2431,11 @@ private:
         bool is_matched = std::find(matched_right_indices.begin(), matched_right_indices.end(), i) != matched_right_indices.end();
         if (is_matched && i >= 0 && i < (int)right_segments.size()) {
           // Add matched segment
-          parallel_right_interpolated_marker.points.push_back(right_segments[i].p1);
-          parallel_right_interpolated_marker.points.push_back(right_segments[i].p2);
+          add_unique_segment(
+            parallel_right_interpolated_marker,
+            right_segments[i].p1,
+            right_segments[i].p2,
+            interpolation_dedup_tolerance);
         } else if (!is_matched && i >= 0 && i < (int)right_segments.size()) {
           // Find adjacent matched segments for interpolation
           int before_idx = -1, after_idx = -1;
@@ -1853,8 +2455,11 @@ private:
             p2.y = right_segments[before_idx].p2.y + (right_segments[after_idx].p1.y - right_segments[before_idx].p2.y) * (i + 1 - before_idx) / (after_idx - before_idx);
             p2.z = 0.0;
             
-            parallel_right_interpolated_marker.points.push_back(p1);
-            parallel_right_interpolated_marker.points.push_back(p2);
+            add_unique_segment(
+              parallel_right_interpolated_marker,
+              p1,
+              p2,
+              interpolation_dedup_tolerance);
           }
         }
       }
@@ -1880,7 +2485,7 @@ private:
     mark_array.markers.push_back(right_start_marker);
     // Also add sphere markers for cluster points so individual points are visible along with lines
     visualization_msgs::msg::Marker cluster1_points_marker;
-    cluster1_points_marker.header.frame_id = input_msg->header.frame_id;
+    cluster1_points_marker.header.frame_id = marker_frame;
     cluster1_points_marker.header.stamp = this->now();
     cluster1_points_marker.ns = "cluster1_points";
     cluster1_points_marker.type = visualization_msgs::msg::Marker::SPHERE_LIST;
@@ -1905,7 +2510,7 @@ private:
     }
 
     visualization_msgs::msg::Marker cluster2_points_marker;
-    cluster2_points_marker.header.frame_id = input_msg->header.frame_id;
+    cluster2_points_marker.header.frame_id = marker_frame;
     cluster2_points_marker.header.stamp = this->now();
     cluster2_points_marker.ns = "cluster2_points";
     cluster2_points_marker.type = visualization_msgs::msg::Marker::SPHERE_LIST;
@@ -1945,7 +2550,7 @@ private:
   if (i < cluster1.get_size(1) - 2) oss << "\n";
       }
       visualization_msgs::msg::Marker angle_text1;
-      angle_text1.header.frame_id = input_msg->header.frame_id;
+      angle_text1.header.frame_id = marker_frame;
       angle_text1.header.stamp = this->now();
       angle_text1.ns = "angles_cluster1";
       angle_text1.id = 50;
@@ -1977,7 +2582,7 @@ private:
   if (i < cluster1.get_size(2) - 2) oss2 << "\n";
       }
       visualization_msgs::msg::Marker angle_text2;
-      angle_text2.header.frame_id = input_msg->header.frame_id;
+      angle_text2.header.frame_id = marker_frame;
       angle_text2.header.stamp = this->now();
       angle_text2.ns = "angles_cluster2";
       angle_text2.id = 51;
@@ -1995,13 +2600,74 @@ private:
       mark_array.markers.push_back(angle_text2);
     }
 
-    pub_marker_->publish(mark_array);
+    publish_marker_topics(mark_array);
+
+    // --- Collect unique interpolated lane points into global accumulators ---
+    const double imerge_sq = interp_point_merge_radius_ * interp_point_merge_radius_;
+
+    auto add_interp_point = [&](std::vector<geometry_msgs::msg::Point> &acc,
+                                const geometry_msgs::msg::Point &pt)
+    {
+      for (const auto &existing : acc)
+      {
+        const double dx = existing.x - pt.x;
+        const double dy = existing.y - pt.y;
+        if ((dx * dx + dy * dy) <= imerge_sq)
+        {
+          return; // already have a nearby point
+        }
+      }
+      acc.push_back(pt);
+    };
+
+    // Extract all unique endpoints from the interpolated LEFT marker
+    for (const auto &pt : parallel_left_interpolated_marker.points)
+    {
+      add_interp_point(interp_left_global_pts_, pt);
+    }
+    // Extract all unique endpoints from the interpolated RIGHT marker
+    for (const auto &pt : parallel_right_interpolated_marker.points)
+    {
+      add_interp_point(interp_right_global_pts_, pt);
+    }
+
+    publish_interpolated_marker_map(
+      parallel_left_interpolated_marker,
+      parallel_right_interpolated_marker,
+      marker_frame,
+      this->now());
+
+    // Build and publish a combined PointCloud2 (left=intensity 0, right=intensity 1)
+    pcl::PointCloud<pcl::PointXYZI> interp_cloud;
+    for (const auto &pt : interp_left_global_pts_)
+    {
+      pcl::PointXYZI p;
+      p.x = pt.x; p.y = pt.y; p.z = 0.0f; p.intensity = 0.0f;
+      interp_cloud.points.push_back(p);
+    }
+    for (const auto &pt : interp_right_global_pts_)
+    {
+      pcl::PointXYZI p;
+      p.x = pt.x; p.y = pt.y; p.z = 0.0f; p.intensity = 1.0f;
+      interp_cloud.points.push_back(p);
+    }
+    interp_cloud.width = interp_cloud.points.size();
+    interp_cloud.height = 1;
+    interp_cloud.is_dense = true;
+    if (!interp_cloud.points.empty())
+    {
+      sensor_msgs::msg::PointCloud2 interp_msg;
+      pcl::toROSMsg(interp_cloud, interp_msg);
+      interp_msg.header.frame_id = marker_frame;
+      interp_msg.header.stamp = this->now();
+      pub_interp_points_->publish(interp_msg);
+    }
 
     // Convert to ROS data type
     sensor_msgs::msg::PointCloud2 output_msg;
     pcl::toROSMsg(*cloud, output_msg);
     // Add the same frame_id as the input, it is not included in pcl PointXYZI
-    output_msg.header.frame_id = input_msg->header.frame_id;
+    output_msg.header.frame_id = marker_frame;
     // Publish the data as a ROS message
     pub_lidar_->publish(output_msg);
   }
@@ -2101,8 +2767,8 @@ private:
     // Publish updated markers
     if (!mark_array_ptr->markers.empty())
     {
-        latest_markers_ = *mark_array_ptr;
-      pub_marker_->publish(*mark_array_ptr);
+      latest_markers_ = *mark_array_ptr;
+      publish_marker_topics(*mark_array_ptr);
     }
     
     last_update_time_ = current_time;
@@ -2129,7 +2795,8 @@ private:
       );
       return predicted;
     } else {
-      turn_radius = wheelbase / std::tan(current_steering_angle_);
+      // Invert steering convention: what used to be left turn becomes right turn.
+      turn_radius = wheelbase / std::tan(-current_steering_angle_);
       
       // Convert point to vehicle-relative coordinates (assuming vehicle at origin)
       double px_rel = p.x;
@@ -2378,6 +3045,7 @@ private:
 
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_lidar_;
   rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr pub_marker_;
+  rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr pub_marker_odom_;
   rclcpp::Subscription<visualization_msgs::msg::MarkerArray>::SharedPtr sub_marker_;
   rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr sub_lidar_;
   rclcpp::Subscription<std_msgs::msg::Float32>::SharedPtr sub_vehicle_speed_;
@@ -2399,8 +3067,22 @@ private:
   int cluster_num = 5;
   float eps_min = 1.2, eps_max = 3.4, ang_threshold_deg = 30.0;
   double origin_filter_radius = 0.25;
+  double global_point_merge_radius_ = 0.15;
+  std::vector<Point> global_points_;
   double init_heading_left_ = 0.0;  // carried initial heading for left cluster
   double init_heading_right_ = 0.0; // carried initial heading for right cluster
+
+  // Accumulated unique interpolated lane points (odom frame)
+  std::vector<geometry_msgs::msg::Point> interp_left_global_pts_;
+  std::vector<geometry_msgs::msg::Point> interp_right_global_pts_;
+  double interp_point_merge_radius_ = 0.2;
+  std::string interp_points_out_topic_ = "interpolated_lane_points";
+  std::string interp_marker_map_out_topic_ = "interpolated_marker_map_odom";
+  rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_interp_points_;
+  rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr pub_interp_marker_map_;
+  visualization_msgs::msg::Marker interp_left_map_marker_;
+  visualization_msgs::msg::Marker interp_right_map_marker_;
+  bool interp_map_markers_initialized_ = false;
   
   // Motion tracking variables
   float current_speed_ = 0.0;  // m/s
@@ -2408,6 +3090,10 @@ private:
   rclcpp::Time last_update_time_;
   rclcpp::TimerBase::SharedPtr motion_update_timer_;
   bool first_update_ = true;
+  std::unique_ptr<tf2_ros::Buffer> tf_buffer_;
+  std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
+  std::string marker_odom_out_topic_ = "clustered_marker_odom";
+  std::string odom_frame_ = "odom";
   
   // colors from https://github.com/jkk-research/colors
   const float md_amber_500_r = 1.00, md_amber_500_g = 0.76, md_amber_500_b = 0.03;
