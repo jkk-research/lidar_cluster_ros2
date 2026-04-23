@@ -23,6 +23,10 @@ git clone https://github.com/jkk-research/lidar_cluster_ros2
 cd ~/ros2_ws
 ```
 
+``` bash
+sudo rosdep install --from-paths src --ignore-src -r -y
+```
+
 Build either with:
 
 ``` bash
@@ -85,6 +89,79 @@ ros2 launch lidar_cluster dblane_spatial.launch.py
 ``` bash
 ros2 launch lidar_cluster dblane_f1s.launch.py topic:=/input_points
 ```
+
+# Dblane-g launch with simulator
+
+To run `dblane-g` with the racetrack simulator, use the Formula Student simulator package from:
+
+https://github.com/szenergy/formula_student_packages/tree/racetracksim-extradata
+
+> [!IMPORTANT]
+> Switch to the `racetracksim-extradata` branch before building.
+
+Example setup in `~/ros2_ws/src`:
+
+``` bash
+cd ~/ros2_ws/src
+git clone https://github.com/szenergy/formula_student_packages.git
+cd formula_student_packages
+git checkout racetracksim-extradata
+```
+
+Build the racetrack simulator package:
+
+``` bash
+cd ~/ros2_ws
+source /opt/ros/humble/setup.bash
+colcon build --packages-select racetrack_simulator --symlink-install
+source ~/ros2_ws/install/setup.bash
+```
+
+Start the simulator:
+
+``` bash
+ros2 launch racetrack_simulator lidar_cone_sim.launch.py
+```
+
+Start `dblane_f1s` in a new terminal (this command starts the cluster node and RViz by default):
+
+``` bash
+source /opt/ros/humble/setup.bash
+source ~/ros2_ws/install/setup.bash
+ros2 launch lidar_cluster dblane_f1s.launch.py
+```
+
+# Start the evaluation node in another terminal:
+
+``` bash
+source /opt/ros/humble/setup.bash
+source ~/ros2_ws/install/setup.bash
+ros2 run lidar_cluster evaluation
+```
+
+## Evaluation node controls:
+
+- Press `e`: evaluate the currently available (already received) input data snapshot, print the metrics, and start publishing evaluation preview topics.
+- Press `Ctrl+C`: exit the evaluator immediately.
+- Published preview topics include `/point_true_positives`, `/point_false_negatives`, `/point_false_positives`, `/edge_true_positives`, `/edge_false_negatives`, `/edge_false_positives`, and `/gt_edges`.
+
+### Evaluator inputs (exact topics)
+
+- `/nonground_odom` (`sensor_msgs/msg/PointCloud2`): Ground-truth cones are initialized from this stream (left/right/noise classes), so this defines what is considered the reference set.
+- `/interpolated_marker_map_odom` (`visualization_msgs/msg/MarkerArray`): Predicted map points and line segments are read from this stream, so this defines what is compared against GT.
+
+When `e` is pressed, the evaluator computes results only from the data that has already arrived on the two input topics at that moment.
+
+### Evaluator outputs
+
+- Terminal output: point-level, hybrid, and edge-level metrics are printed (TP/FP/FN, precision, sensitivity, F-measure, etc.) for the current snapshot.
+- `/point_true_positives`: GT cone points that are matched by prediction within threshold.
+- `/point_false_negatives`: GT cone points that are currently unmatched.
+- `/point_false_positives`: predicted points that currently do not match any GT cone.
+- `/edge_true_positives`: GT consecutive edges that are matched by predicted edges.
+- `/edge_false_negatives`: GT edges that are currently unmatched.
+- `/edge_false_positives`: predicted edges that do not match GT edges.
+- `/gt_edges`: the GT left/right edge chains in `odom`; useful as a stable reference overlay in RViz.
 
 ## Remarks
 

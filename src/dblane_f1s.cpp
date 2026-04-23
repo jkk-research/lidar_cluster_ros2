@@ -11,6 +11,7 @@
 #include <iomanip>
 #include <vector>
 #include <algorithm>
+#include <iostream>
 // ROS
 #include "rclcpp/rclcpp.hpp"
 #include "sensor_msgs/msg/point_cloud2.hpp"
@@ -34,6 +35,27 @@
 
 using namespace std::chrono_literals;
 using std::placeholders::_1;
+
+// Silence verbose debug/warn logs; keep only startup RCLCPP_INFO.
+#ifdef RCLCPP_INFO_STREAM
+#undef RCLCPP_INFO_STREAM
+#endif
+#define RCLCPP_INFO_STREAM(...) ((void)0)
+
+#ifdef RCLCPP_INFO_THROTTLE
+#undef RCLCPP_INFO_THROTTLE
+#endif
+#define RCLCPP_INFO_THROTTLE(...) ((void)0)
+
+#ifdef RCLCPP_WARN
+#undef RCLCPP_WARN
+#endif
+#define RCLCPP_WARN(...) ((void)0)
+
+#ifdef RCLCPP_WARN_STREAM
+#undef RCLCPP_WARN_STREAM
+#endif
+#define RCLCPP_WARN_STREAM(...) ((void)0)
 
 class DblaneFormula : public rclcpp::Node
 {
